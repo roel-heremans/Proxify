@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 import os
 
 if __name__ == "__main__":
-    file_to_load = 'site261_new_XGB_5'
+    file_to_load = 'site261_new_XGB_0'
 
 # to open the pickle file that contains the model and use the pretrained  to predict
     with open(os.path.join('output',file_to_load+'.pkl'), 'rb') as file:
