@@ -240,8 +240,8 @@ if __name__ == "__main__":
                                       '_inpute(' + str(ch_dict['inpute_each']) + ',' + str(ch_dict['inpute_std']) + ')' +
                                       '.pkl')
             ch_dict.update({'pickle_out': pickle_out})
-            # comment next line oput when pickle exists (no need to run)
-            #run_change_point_detection(ch_dict)
+            # comment next line out when pickle exists (no need to run)
+            run_change_point_detection(ch_dict)
             # to open the pickle file that contains the result of the run_change_detection
             with open(pickle_out, 'rb') as file:
                 df = pickle.load(file)

@@ -22,13 +22,14 @@ if __name__ == "__main__":
     if not os.path.exists(out_dir):
         os.makedirs(out_dir)
 
-    ####################################################################
+    ################## Set up parameters here ##########################
     site = '261_new'                                                   #
-    nr_col_ev = 10      # number of plots on one page for EV           #
-    nr_col_meter = 10   # number of plots on one page for meters       #
-    target_id_list = [0]  # Give id of the meter     #
-                                            # (e.g. 0 for Total_TGBT)  #
-    plots_on = False     # True for getting data exploratory plots      #
+    plots_on = False      # True for getting data exploratory plots    #
+    nr_col_ev = 10        # number of plots on one page for EV         #
+                          # (i.e. Explorative Variables)               #
+    nr_col_meter = 10     # number of plots on one page for meters     #
+    target_id_list = [0,1,2,3]  # Give id of the meter to predict      #
+                          # (e.g. 0 which is called Total_TGBT)        #
     ####################################################################
 
     df_evs, df_meters, value_map = read_data(site)
