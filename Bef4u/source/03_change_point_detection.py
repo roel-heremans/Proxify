@@ -220,8 +220,8 @@ if __name__ == "__main__":
     # dict contaiing all the neceswsary variables to run Change Point Detection
     #for ws in [400, 600, 1000, 1200]:
     #    for ts in [50, 100]:
-    for ws in [400, 600, 1000, 1200]:
-        for ts in [50, 100]:
+    for ws in [1200]:
+        for ts in [100]:
             print(ws, ts)
             print('**************')
 
@@ -231,7 +231,7 @@ if __name__ == "__main__":
                        'test_size': ts,
                        'inpute_each': 100,
                        'inpute_std': 3,
-                       'control_factor': 4,
+                       'control_factor': 2,
                        'print_each': 1000}
 
             pickle_out = os.path.join('output', 'CPD_site' + str(ch_dict['site']) +
@@ -241,12 +241,12 @@ if __name__ == "__main__":
                                       '.pkl')
             ch_dict.update({'pickle_out': pickle_out})
             # comment next line oput when pickle exists (no need to run)
-            run_change_point_detection(ch_dict)
+            #run_change_point_detection(ch_dict)
             # to open the pickle file that contains the result of the run_change_detection
             with open(pickle_out, 'rb') as file:
                 df = pickle.load(file)
             plot_change_point_result(df, ch_dict)
-            #time_serie_decomposition(df, ch_dict)
-            #statistical_control_chart(df, ch_dict)
+            time_serie_decomposition(df, ch_dict)
+            statistical_control_chart(df, ch_dict)
 
 
