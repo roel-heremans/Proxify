@@ -27,13 +27,13 @@ def getting_extrema(df, col_name):
     df['Temp_smooth'].fillna(method='bfill', inplace=True)
     temperature = df['Temp_smooth']
 
-    maxima_indices, _ = find_peaks(temperature, prominence=0.1)
-    minima_indices, _ = find_peaks(-temperature, prominence=0.1)
+    maxima_indices, _ = find_peaks(temperature, prominence=0.1, distance=4)
+    minima_indices, _ = find_peaks(-temperature, prominence=0.1, distance=5)
 
-    #plt.plot(df['Temp_smooth'])
-    #plt.plot(df.iloc[maxima_indices]['Temp_smooth'],marker='o',color='r', linestyle='')
-    #plt.plot(df.iloc[minima_indices]['Temp_smooth'],marker='o',color='g', linestyle='')
-    #plt.show()
+    plt.plot(df['Temp_smooth'])
+    plt.plot(df.iloc[maxima_indices]['Temp_smooth'],marker='o',color='r', linestyle='')
+    plt.plot(df.iloc[minima_indices]['Temp_smooth'],marker='o',color='g', linestyle='')
+    plt.show()
     # Ensure alternating pattern: alternating_max_min contains alternating maxima and minima
     alternating_max_min = []
     if len(maxima_indices) > 0:
