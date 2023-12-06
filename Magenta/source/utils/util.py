@@ -184,11 +184,13 @@ def my_local_extrema():
 
     plotly_data(df_eval_test, col_name_dict, dict_for_plot_title)
 
-    print("\nLocal Extrema:\n**************")
-    print(f"Accuracy: {accuracy_train:.2f} -> {accuracy_test:.2f}")
+    print("\n      Local Extrema:\n      **************")
+    print(f"  Metric:  Train   Test")
+    print(f"------------------------")
+    print(f"Accuracy:  {accuracy_train:.2f} -> {accuracy_test:.2f}")
     print(f"Precision: {precision_train:.2f} -> {precision_test:.2f}")
-    print(f"Recall: {recall_train:.2f} -> {recall_test:.2f}")
-    print(f"F1: {f1_train:.2f} -> {f1_test:.2f}")
+    print(f"Recall:    {recall_train:.2f} -> {recall_test:.2f}")
+    print(f"F1:        {f1_train:.2f} -> {f1_test:.2f}")
 
     res_dict = {'Accuracy': [accuracy_train, accuracy_test],
                 'Precision': [precision_train, precision_test],
@@ -264,11 +266,13 @@ def my_logistic_regression():
                            'eval_test': [accuracy_test, precision_test, recall_test, f1_test]}
     plotly_data(df_eval, col_name_dict, dict_for_plot_title)
 
-    print("\nLogistic Regression:\n********************")
-    print(f"Accuracy: {accuracy_train:.2f} -> {accuracy_test:.2f}")
+    print("\n   Logistic Regression:\n  *********************")
+    print(f"  Metric:  Train   Test")
+    print(f"------------------------")
+    print(f"Accuracy:  {accuracy_train:.2f} -> {accuracy_test:.2f}")
     print(f"Precision: {precision_train:.2f} -> {precision_test:.2f}")
-    print(f"Recall: {recall_train:.2f} -> {recall_test:.2f}")
-    print(f"F1: {f1_train:.2f} -> {f1_test:.2f}")
+    print(f"Recall:    {recall_train:.2f} -> {recall_test:.2f}")
+    print(f"F1:        {f1_train:.2f} -> {f1_test:.2f}")
 
     res_dict = {'Accuracy': [accuracy_train, accuracy_test],
                 'Precision': [precision_train, precision_test],
@@ -366,11 +370,18 @@ def my_xgb():
 
     plotly_data(df_eval_test, col_name_dict, dict_for_plot_title)
 
-    print("\nXGBoost:\n*********")
-    print(f"Accuracy: {accuracy_train:.2f} -> {accuracy_test:.2f}")
+    print("\n  XGBoost:\n  ********")
+    print(f"  Metric:  Train   Test")
+    print(f"------------------------")
+    print(f"Accuracy:  {accuracy_train:.2f} -> {accuracy_test:.2f}")
     print(f"Precision: {precision_train:.2f} -> {precision_test:.2f}")
-    print(f"Recall: {recall_train:.2f} -> {recall_test:.2f}")
-    print(f"F1: {f1_train:.2f} -> {f1_test:.2f}")
+    print(f"Recall:    {recall_train:.2f} -> {recall_test:.2f}")
+    print(f"F1:        {f1_train:.2f} -> {f1_test:.2f}")
+
+    res_dict = {'Accuracy': [accuracy_train, accuracy_test],
+                'Precision': [precision_train, precision_test],
+                'Recall': [recall_train, recall_test],
+                'F1': [f1_train, f1_test]}
 
     res_dict = {'Accuracy': [accuracy_train, accuracy_test],
                 'Precision': [precision_train, precision_test],
@@ -615,6 +626,7 @@ def plot_data(df, col_name_dict, dict_for_plot_title):
         plot_name = 'temp_graph_f{}.png'.format(dict_for_plot_title['file'][0])
 
     plt.savefig(os.path.join('plots',plot_name))
+
 
 def plot_evaluation(res):
     '''
