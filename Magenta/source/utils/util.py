@@ -1,12 +1,15 @@
-
 import os
 import datetime
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
-from matplotlib.patches import Rectangle
+import xgboost as xgb
 import plotly.graph_objects as go
+import matplotlib.pyplot as plt
+
+from matplotlib.patches import Rectangle
 from scipy.signal import find_peaks
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
 
 pd.options.mode.chained_assignment = None
 
@@ -25,41 +28,37 @@ def getting_extrema(df, col_name):
     window_size = 2
     df['Temp_smooth'] = df['Temperature'].rolling(window=window_size).mean()
     df['Temp_smooth'].fillna(method='bfill', inplace=True)
-    temperature = df['Temp_smooth']
+    temperatures = df['Temp_smooth']
 
-    maxima_indices, _ = find_peaks(temperature, prominence=0.1, distance=4)
-    minima_indices, _ = find_peaks(-temperature, prominence=0.1, distance=5)
+    #maxima_indices, _ = find_peaks(temperatures, prominence=0.3, distance=4)
+    #minima_indices, _ = find_peaks(-temperatures, prominence=0.3, distance=5)
+    maxima_indices, _ = find_peaks(temperatures,  distance=3)
+    minima_indices, _ = find_peaks(-temperatures,  distance=3)
 
-    plt.plot(df['Temp_smooth'])
-    plt.plot(df.iloc[maxima_indices]['Temp_smooth'],marker='o',color='r', linestyle='')
-    plt.plot(df.iloc[minima_indices]['Temp_smooth'],marker='o',color='g', linestyle='')
-    plt.show()
-    # Ensure alternating pattern: alternating_max_min contains alternating maxima and minima
+    # Todo: check that the maxima_indices and minima_indices are alternating
+    # Ensure alternating pattern: a maxima followed by a minima and vice versa
     alternating_max_min = []
-    if len(maxima_indices) > 0:
-        alternating_max_min.append(maxima_indices[0])
-    for i in range(1,min(len(minima_indices), len(maxima_indices))):
-        alternating_max_min.append(minima_indices[i-1])
+    for i in range(min(len(minima_indices), len(maxima_indices))):
         alternating_max_min.append(maxima_indices[i])
+        alternating_max_min.append(minima_indices[i])
 
-    alternating_max_min = np.sort(alternating_max_min)
-
-    #plt.plot(df['Temp_smooth'])
-    #plt.plot(df.iloc[alternating_max_min[0::2]]['Temp_smooth'],marker='o',color='r', linestyle='')
-    #plt.plot(df.iloc[alternating_max_min[1::2]]['Temp_smooth'],marker='o',color='g', linestyle='')
-    #plt.show()
-
-
+    # Generate an array with alternating maxima and minima
+    alternating_temperatures = temperatures[np.sort(alternating_max_min)]
 
     # Assign the calculated values to the DataFrame column 'Temp_extrema'
     df['Temp_extrema'] = 1
-    df['Temp_extrema'].iloc[alternating_max_min[0::2]] = 2
-    df['Temp_extrema'].iloc[alternating_max_min[1::2]] = -2
-    df['Temp_extrema'].iloc[0:alternating_max_min[0]] = 1
+    for val1,val2 in zip(alternating_temperatures.index[0::2], alternating_temperatures.index[1::2]):
+        df.loc[val1:val2, 'Temp_extrema'] = -1
+    df.loc[alternating_temperatures.index[0::2], 'Temp_extrema'] = 2
+    df.loc[alternating_temperatures.index[1::2], 'Temp_extrema'] = -2
 
-    for val1,val2 in zip(alternating_max_min[0::2], alternating_max_min[1::2]):
-        df['Temp_extrema'].iloc[val1+1:val2] = -1
-
+    # Uncomment for debugging purpose
+    #fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 6), sharex=True)
+    #ax1.plot(df['Temp_smooth'])
+    #ax1.plot(alternating_temperatures[0::2],marker='o',color='r', linestyle='')
+    #ax1.plot(alternating_temperatures[1::2],marker='o',color='g', linestyle='')
+    #ax2.plot(df["Temp_extrema"], marker='o', color='k', linestyle='')
+    #plt.show()
     return df
 
 def get_training_data_between(filename,
@@ -123,6 +122,262 @@ def import_xlsx_to_df(filename, timestamp_col_name='DateTime_EAT', temp_col_name
             col_name_dict.update({key: value})
 
     return df, col_name_dict
+
+
+def my_local_extrema():
+    # Assuming 'data' contains your dataset with columns 'Timestamp', 'Temperature', and 'GroundTruth'
+    # 'GroundTruth' has binary labels indicating pump usage (1 for in use, 0 for not in use)
+    file_names = {
+        '01': 'Consolidated UG Data Jan 2023',
+        '02': 'Kaliro Use Data (Kakosi Budumba) 230912'
+    }
+    run_file_id = '01'
+    feature_list = ['Temperature', 'Temp_diff', 'Temp_Rolling_Mean']
+    data_files = {key: os.path.join('data', '{}.xlsx'.format(value)) for key, value in file_names.items()}
+    data_train = get_training_data_between(data_files[run_file_id],
+                              start_datetime = pd.to_datetime('2023-01-13 10:49:00'),
+                              stop_datetime = pd.to_datetime('2023-01-13 18:00:00'))
+
+    # Making predictions on the training set
+    y_train = data_train['GroundTruth']
+    y_pred_train = data_train['Temp_extrema']!=1
+
+    # Make predictions
+    data_test = get_training_data_between(data_files[run_file_id],
+                              start_datetime = pd.to_datetime('2023-02-02 08:44:00'),
+                              stop_datetime = pd.to_datetime('2023-02-02 13:49:00'))
+
+    # Making predictions on the test set
+    y_test = data_test['GroundTruth']
+    y_pred_test = data_test['Temp_extrema']!=1
+
+
+    # Evaluate accuracy, precision, recall, and F1-score On Train
+    accuracy_train = accuracy_score(y_train, y_pred_train)
+    precision_train = precision_score(y_train, y_pred_train)
+    recall_train = recall_score(y_train, y_pred_train)
+    f1_train = f1_score(y_train, y_pred_train)
+
+    df_eval_train = data_train[['Temperature', 'Temp_diff', 'GroundTruth']]
+    df_eval_train['Prediction'] = y_pred_train
+
+    col_name_dict = {'temp_col_name': 'Temperature', 'gt_col_name': 'GroundTruth', 'pred_col_name': 'Prediction'}
+    dict_for_plot_title = {'file': [run_file_id,file_names[run_file_id]],
+                           'model': ['LocalExtrema', 'OnTrainData'],
+                           'eval_train': [accuracy_train,precision_train,recall_train,f1_train]}
+
+    plotly_data(df_eval_train, col_name_dict, dict_for_plot_title)
+
+    # Evaluate accuracy, precision, recall, and F1-score On Test
+    accuracy_test = accuracy_score(y_test, y_pred_test)
+    precision_test = precision_score(y_test, y_pred_test)
+    recall_test = recall_score(y_test, y_pred_test)
+    f1_test = f1_score(y_test, y_pred_test)
+
+    df_eval_test = data_test[['Temperature', 'GroundTruth']]
+    df_eval_test['Prediction'] = y_pred_test
+
+    col_name_dict = {'temp_col_name': 'Temperature', 'gt_col_name': 'GroundTruth', 'pred_col_name': 'Prediction'}
+    dict_for_plot_title = {'file': [run_file_id,file_names[run_file_id]],
+                           'model': ['LocalExtrema', 'OnTestData'],
+                           'eval_test': [accuracy_test,precision_test,recall_test,f1_test]}
+
+    plotly_data(df_eval_test, col_name_dict, dict_for_plot_title)
+
+    print("\nLocal Extrema:\n**************")
+    print(f"Accuracy: {accuracy_train:.2f} -> {accuracy_test:.2f}")
+    print(f"Precision: {precision_train:.2f} -> {precision_test:.2f}")
+    print(f"Recall: {recall_train:.2f} -> {recall_test:.2f}")
+    print(f"F1: {f1_train:.2f} -> {f1_test:.2f}")
+
+    res_dict = {'Accuracy': [accuracy_train, accuracy_test],
+                'Precision': [precision_train, precision_test],
+                'Recall': [recall_train, recall_test],
+                'F1': [f1_train, f1_test]}
+
+    return res_dict
+
+
+def my_logistic_regression():
+    # Assuming 'data' contains your dataset with columns 'Timestamp', 'Temperature', and 'GroundTruth'
+    # 'GroundTruth' has binary labels indicating pump usage (1 for in use, 0 for not in use)
+    file_names = {
+        '01': 'Consolidated UG Data Jan 2023',
+        '02': 'Kaliro Use Data (Kakosi Budumba) 230912'
+    }
+    run_file_id = '01'
+    feature_list = ['Temperature', 'Temp_diff', 'Temp_extrema']
+    data_files = {key: os.path.join('data', '{}.xlsx'.format(value)) for key, value in file_names.items()}
+    data_train = get_training_data_between(data_files[run_file_id],
+                              start_datetime = pd.to_datetime('2023-01-13 10:49:00'),
+                              stop_datetime = pd.to_datetime('2023-01-13 18:00:00'))
+
+    # Prepare features (Temperature) and target (GroundTruth)
+    X_train = data_train[feature_list]  # Features
+    y_train = data_train['GroundTruth']    # Target
+
+    # Initialize the Logistic Regression model
+    model = LogisticRegression(class_weight='balanced')
+
+    # Train the model
+    model.fit(X_train, y_train)
+
+    # Make predictions on the same Training set to see if the model has at all some potential
+    y_pred_train = model.predict(X_train)
+
+    # Evaluate accuracy, precision, recall, and F1-score on Training set
+    accuracy_train = accuracy_score(y_train, y_pred_train)
+    precision_train = precision_score(y_train, y_pred_train)
+    recall_train = recall_score(y_train, y_pred_train)
+    f1_train = f1_score(y_train, y_pred_train)
+
+    df_eval_train = data_train[['Temperature', 'Temp_diff', 'GroundTruth']]
+    df_eval_train['Prediction'] = y_pred_train
+
+    col_name_dict = {'temp_col_name': 'Temperature', 'gt_col_name': 'GroundTruth', 'pred_col_name': 'Prediction'}
+    dict_for_plot_title = {'file': [run_file_id,file_names[run_file_id]],
+                           'model': ['LogReg', 'OnTrainData'],
+                           'eval_train': [accuracy_train, precision_train, recall_train, f1_train]}
+    plotly_data(df_eval_train, col_name_dict, dict_for_plot_title)
+
+
+    # Make predictions on Test set
+    data_test = get_training_data_between(data_files[run_file_id],
+                              start_datetime = pd.to_datetime('2023-02-02 08:44:00'),
+                              stop_datetime = pd.to_datetime('2023-02-02 13:49:00'))
+    X_test = data_test[feature_list]  # Features
+    y_test = data_test['GroundTruth']    # Target
+    y_pred = model.predict(X_test)
+
+    # Evaluate accuracy, precision, recall, and F1-score on Test data
+    accuracy_test = accuracy_score(y_test, y_pred)
+    precision_test = precision_score(y_test, y_pred)
+    recall_test = recall_score(y_test, y_pred)
+    f1_test = f1_score(y_test, y_pred)
+
+    df_eval = data_test[['Temperature', 'Temp_diff', 'GroundTruth']]
+    df_eval['Prediction'] = y_pred
+
+    col_name_dict = {'temp_col_name': 'Temperature', 'gt_col_name': 'GroundTruth', 'pred_col_name': 'Prediction'}
+    dict_for_plot_title = {'file': [run_file_id,file_names[run_file_id]],
+                           'model': ['LogReg', 'OnTestData'],
+                           'eval_test': [accuracy_test, precision_test, recall_test, f1_test]}
+    plotly_data(df_eval, col_name_dict, dict_for_plot_title)
+
+    print("\nLogistic Regression:\n********************")
+    print(f"Accuracy: {accuracy_train:.2f} -> {accuracy_test:.2f}")
+    print(f"Precision: {precision_train:.2f} -> {precision_test:.2f}")
+    print(f"Recall: {recall_train:.2f} -> {recall_test:.2f}")
+    print(f"F1: {f1_train:.2f} -> {f1_test:.2f}")
+
+    res_dict = {'Accuracy': [accuracy_train, accuracy_test],
+                'Precision': [precision_train, precision_test],
+                'Recall': [recall_train, recall_test],
+                'F1': [f1_train, f1_test]}
+    return res_dict
+
+
+def my_xgb():
+    # Assuming 'data' contains your dataset with columns 'Timestamp', 'Temperature', and 'GroundTruth'
+    # 'GroundTruth' has binary labels indicating pump usage (1 for in use, 0 for not in use)
+    file_names = {
+        '01': 'Consolidated UG Data Jan 2023',
+        '02': 'Kaliro Use Data (Kakosi Budumba) 230912'
+    }
+    run_file_id = '01'
+    feature_list = ['Temperature', 'Temp_diff', 'Temp_extrema']
+
+    data_files = {key: os.path.join('data', '{}.xlsx'.format(value)) for key, value in file_names.items()}
+    data_train = get_training_data_between(data_files[run_file_id],
+                              start_datetime = pd.to_datetime('2023-01-13 10:49:00'),
+                              stop_datetime = pd.to_datetime('2023-01-13 18:00:00'))
+
+    # Prepare features (Temperature) and target (GroundTruth)
+    X_train = data_train[feature_list]  # Features
+    y_train = data_train['GroundTruth']    # Target
+
+    # Make predictions
+    data_test = get_training_data_between(data_files[run_file_id],
+                              start_datetime = pd.to_datetime('2023-02-02 08:44:00'),
+                              stop_datetime = pd.to_datetime('2023-02-02 13:49:00'))
+
+    X_test = data_test[feature_list]  # Features
+    y_test = data_test['GroundTruth']    # Target
+
+    # Convert data into DMatrix format (XGBoost's internal optimized data structure)
+    dtrain = xgb.DMatrix(X_train, label=y_train)
+    dtest = xgb.DMatrix(X_test, label=y_test)
+
+    # Define parameters for XGBoost
+    params = {
+        'objective': 'binary:logistic',  # Binary classification
+        'max_depth': 3,
+        'learning_rate': 0.1,
+        'eval_metric': 'error'  # Evaluation metric
+    }
+
+    # Train the XGBoost model
+    num_round = 100  # Number of boosting rounds
+    bst = xgb.train(params, dtrain, num_round)
+
+    # Predict on the train set
+    y_pred_prob = bst.predict(dtrain)
+    # Convert predicted probabilities to binary predictions
+    y_pred_train = [1 if pred > 0.5 else 0 for pred in y_pred_prob]
+
+    # Predict on the test set
+    y_pred_prob = bst.predict(dtest)
+    # Convert predicted probabilities to binary predictions
+    y_pred_test = [1 if pred > 0.5 else 0 for pred in y_pred_prob]
+
+
+    # Evaluate accuracy, precision, recall, and F1-score On Train
+    accuracy_train = accuracy_score(y_train, y_pred_train)
+    precision_train = precision_score(y_train, y_pred_train)
+    recall_train = recall_score(y_train, y_pred_train)
+    f1_train = f1_score(y_train, y_pred_train)
+
+    df_eval_train = data_train[['Temperature', 'Temp_diff', 'GroundTruth']]
+    df_eval_train['Prediction'] = y_pred_train
+
+    col_name_dict = {'temp_col_name': 'Temperature', 'gt_col_name': 'GroundTruth', 'pred_col_name': 'Prediction'}
+    dict_for_plot_title = {'file': [run_file_id,file_names[run_file_id]],
+                           'model': ['XGBoost', 'OnTrainData'],
+                           'eval_train': [accuracy_train,precision_train,recall_train,f1_train]}
+
+    plotly_data(df_eval_train, col_name_dict, dict_for_plot_title)
+
+
+
+
+    # Evaluate accuracy, precision, recall, and F1-score On Test
+    accuracy_test = accuracy_score(y_test, y_pred_test)
+    precision_test = precision_score(y_test, y_pred_test)
+    recall_test = recall_score(y_test, y_pred_test)
+    f1_test = f1_score(y_test, y_pred_test)
+
+    df_eval_test = data_test[['Temperature', 'GroundTruth']]
+    df_eval_test['Prediction'] = y_pred_test
+
+    col_name_dict = {'temp_col_name': 'Temperature', 'gt_col_name': 'GroundTruth', 'pred_col_name': 'Prediction'}
+    dict_for_plot_title = {'file': [run_file_id,file_names[run_file_id]],
+                           'model': ['XGBoost', 'OnTestData'],
+                           'eval_test': [accuracy_test,precision_test,recall_test,f1_test]}
+
+    plotly_data(df_eval_test, col_name_dict, dict_for_plot_title)
+
+    print("\nXGBoost:\n*********")
+    print(f"Accuracy: {accuracy_train:.2f} -> {accuracy_test:.2f}")
+    print(f"Precision: {precision_train:.2f} -> {precision_test:.2f}")
+    print(f"Recall: {recall_train:.2f} -> {recall_test:.2f}")
+    print(f"F1: {f1_train:.2f} -> {f1_test:.2f}")
+
+    res_dict = {'Accuracy': [accuracy_train, accuracy_test],
+                'Precision': [precision_train, precision_test],
+                'Recall': [recall_train, recall_test],
+                'F1': [f1_train, f1_test]}
+
+    return res_dict
 
 
 def resample_df(df, resample='1T'):
@@ -361,3 +616,52 @@ def plot_data(df, col_name_dict, dict_for_plot_title):
 
     plt.savefig(os.path.join('plots',plot_name))
 
+def plot_evaluation(res):
+    '''
+    Comparing the different evaluation metrices for the different models
+    :param res: is a dict containing the results of the different models
+    :return:
+    '''
+
+    fig, axs = plt.subplots(2, 2, figsize=(10, 8))
+
+    markers = ['+', 'o']  # Markers for train and test data
+    colors = ['blue', 'green', 'red']  # Different colors for each model
+
+    models = list(res.keys())
+    metrics = list(res[models[0]].keys())
+    positions = [(0, 0), (0, 1), (1, 0), (1, 1)]
+
+    for idx, metric in enumerate(metrics):
+        ax = axs[positions[idx]]
+        for i, (model, values) in enumerate(res.items()):
+            train_value, test_value = values[metric]
+            ax.plot(i, train_value, marker='+', color=colors[i], label=f'{model} Train', markersize=8)
+            ax.plot(i, test_value, marker='o', color=colors[i], label=f'{model} Test', markersize=8)
+
+        ax.set_xticks(range(len(res)))
+        ax.set_xticklabels(res.keys()) #, rotation=45)
+        ax.set_title(metric)
+        ax.set_ylim(0, 1)  # Set y-limits to 0 and 1
+        ax.grid()
+
+        # Remove x-labels for subplots at the top
+        if idx < 2:
+            ax.set_xticklabels([])
+
+        # Remove legend from subplots
+        ax.legend().remove()
+
+    # Create a common legend outside the subplots
+    #handles, labels = ax.get_legend_handles_labels()
+    #fig.legend(handles, labels, loc='upper right')
+
+    # Shrink current axis
+    box = ax.get_position()
+    ax.set_position([box.x0, box.y0, box.width * 0.96, box.height])
+
+    # Put a legend to the right of the current axis
+    ax.legend(loc='center left', bbox_to_anchor=(1, 0.5))
+
+    plt.tight_layout()
+    plt.savefig(os.path.join('plots','evaluation.png'))

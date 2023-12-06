@@ -6,7 +6,7 @@ from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_sc
 from utils.util import get_training_data_between, plotly_data
 
 
-if __name__ == "__main__":
+def my_logistic_regression():
     # Assuming 'data' contains your dataset with columns 'Timestamp', 'Temperature', and 'GroundTruth'
     # 'GroundTruth' has binary labels indicating pump usage (1 for in use, 0 for not in use)
     file_names = {
@@ -74,5 +74,11 @@ if __name__ == "__main__":
 
     print(f"Accuracy: {accuracy_train:.2f} -> {accuracy_test:.2f}")
     print(f"Precision: {precision_train:.2f} -> {precision_test:.2f}")
-    print(f"Recall: {recall_train:.2f} -> {recall_train:.2f}")
+    print(f"Recall: {recall_train:.2f} -> {recall_test:.2f}")
     print(f"F1: {f1_train:.2f} -> {f1_test:.2f}")
+
+    res_dict = {'Accuracy': [accuracy_train, accuracy_test],
+                'Precision': [precision_train, precision_test],
+                'Recall': [recall_train, recall_test],
+                'F1': [f1_train, f1_test]}
+    return res_dict
