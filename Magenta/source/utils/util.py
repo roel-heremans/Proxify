@@ -5,6 +5,7 @@ import numpy as np
 import xgboost as xgb
 import plotly.graph_objects as go
 import matplotlib.pyplot as plt
+import matplotlib.patches as mpatches
 
 from matplotlib.patches import Rectangle
 from scipy.signal import find_peaks
@@ -15,7 +16,9 @@ pd.options.mode.chained_assignment = None
 
 
 def create_output_directories():
-    ''' Checks if the directories are already existing, if not existing they will get created
+    ''' Creates the different output directories related to the project.
+        Checks if the directories are already existing, if not existing
+        they will get created
     '''
     to_create_paths = ['plots', 'plotly']
     for my_path in to_create_paths:
@@ -24,18 +27,15 @@ def create_output_directories():
             os.makedirs(os.path.join(os.getcwd(), my_path))
 
 def getting_extrema(df, col_name):
-
+    debug = 1
     window_size = 2
     df['Temp_smooth'] = df['Temperature'].rolling(window=window_size).mean()
     df['Temp_smooth'].fillna(method='bfill', inplace=True)
     temperatures = df['Temp_smooth']
 
-    #maxima_indices, _ = find_peaks(temperatures, prominence=0.3, distance=4)
-    #minima_indices, _ = find_peaks(-temperatures, prominence=0.3, distance=5)
     maxima_indices, _ = find_peaks(temperatures,  distance=3)
     minima_indices, _ = find_peaks(-temperatures,  distance=3)
 
-    # Todo: check that the maxima_indices and minima_indices are alternating
     # Ensure alternating pattern: a maxima followed by a minima and vice versa
     alternating_max_min = []
     for i in range(min(len(minima_indices), len(maxima_indices))):
@@ -52,13 +52,49 @@ def getting_extrema(df, col_name):
     df.loc[alternating_temperatures.index[0::2], 'Temp_extrema'] = 2
     df.loc[alternating_temperatures.index[1::2], 'Temp_extrema'] = -2
 
-    # Uncomment for debugging purpose
-    #fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 6), sharex=True)
-    #ax1.plot(df['Temp_smooth'])
-    #ax1.plot(alternating_temperatures[0::2],marker='o',color='r', linestyle='')
-    #ax1.plot(alternating_temperatures[1::2],marker='o',color='g', linestyle='')
-    #ax2.plot(df["Temp_extrema"], marker='o', color='k', linestyle='')
-    #plt.show()
+
+
+    if debug:
+        annotation_height = 0.1
+        bin_width = df.index[1] - df.index[0]
+        y_bottom = min(df['Temperature'])+annotation_height
+        y_top = max(df['Temperature'])-annotation_height
+
+
+        fig, ax1 = plt.subplots(1, 1, figsize=(10, 6))
+        ax1.plot(df['Temp_smooth'])
+        ax1.plot(alternating_temperatures[0::2],marker='o',color='r', linestyle='')
+        ax1.plot(alternating_temperatures[1::2],marker='o',color='g', linestyle='')
+        color_map = {-1: "#41b6c4", 1: "#2c7fb8", 2: 'red', -2: 'green'}
+        anno_map = {-1: "Down trend", 1: "Up trend", 2: 'Loc Max', -2: 'Loc Min'}
+        for value in color_map.keys():
+            subset = df[df['Temp_extrema'] == value]
+
+            for index, row in subset.iterrows():
+                bin_start = index - bin_width / 2  # Half bin before
+                bin_end = index + bin_width / 2  # Half bin after
+                rect_bottom = Rectangle((bin_start, y_bottom), bin_width, annotation_height,
+                                        color=color_map[value])
+                ax1.add_patch(rect_bottom)
+                rect_top = Rectangle((bin_start, y_top), bin_width, annotation_height,
+                                     color=color_map[value])
+                ax1.add_patch(rect_top)
+                rect_between = Rectangle((bin_start, y_bottom), bin_width, y_top-y_bottom,
+                                         color=color_map[value], alpha=0.4)
+                ax1.add_patch(rect_between)
+
+        # Create legend handles for the annotation colors
+
+        legend_handles = []
+        for value, color in color_map.items():
+            legend_handles.append(mpatches.Patch(color=color, label=anno_map[value]))
+
+        plt.legend(handles=legend_handles)
+
+        plt.grid()
+        plt.show()
+        plt.savefig(os.path.join('plots','Extrema.png'))
+
     return df
 
 def get_training_data_between(filename,
