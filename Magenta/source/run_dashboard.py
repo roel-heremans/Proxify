@@ -77,7 +77,7 @@ def get_data(filename, config_dict):
 
     df_extrema = getting_extrema(df['Temp_smooth'], config_dict)
     df = pd.concat([df, df_extrema], axis=1)
-    print(df.columns)
+
     return df
 
 def get_plotly_fig(df, config_dict):
@@ -220,9 +220,7 @@ app.layout = html.Div([
     ]),
 
     # Display the graph and duration output in separate Div elements
-    html.Div([
-        dcc.Graph(id='graph'),
-    ]),
+    html.Div([ dcc.Graph(id='graph', config={'editable': True, 'editSelection': True}) ]),
     html.Div(id='duration-output'),
 
 ])
@@ -243,7 +241,6 @@ app.layout = html.Div([
 def update_graph(selected_file, smooth_factor, resample_string,
                  dist_for_maxima, dist_for_minima, peak_prominence,
                  timestamp_col_name, temp_col_name, gt_col_name):
-    print('Update_graph: {}'.format(selected_file))
     if selected_file:
         print('File selected is: {}'.format(selected_file))
         # Update config_dict values based on user input
@@ -259,35 +256,59 @@ def update_graph(selected_file, smooth_factor, resample_string,
         # This assumes your read_data function takes the file name and returns a DataFrame
         df = get_data(os.path.join(data_directory, selected_file), config_dict)
 
+
         # generate graph
         fig = get_plotly_fig(df, config_dict)
 
         return fig
     else:
-
         return {}
 
 # Callback to update the duration output
 @app.callback(
     Output('duration-output', 'children'),
-    [Input('file-dropdown', 'value')]
+    [Input('file-dropdown', 'value'),
+     Input('graph', 'selectedData')]
 )
-
-def update_duration_output(selected_file):
+def update_duration_output(selected_file, selected_data):
     if selected_file:
         df = get_data(os.path.join(data_directory, selected_file), config_dict)
-        on_state_duration = calculate_on_state_duration(df, config_dict)
+        on_state_duration_file = calculate_on_state_duration(df)
+        on_state_duration_range = 0
 
         duration_output = html.Div([
-            html.Label('Duration in "on" state: '),
-            html.Label(f'{on_state_duration} minutes')
+            html.Label('Duration in "on" state (File): '),
+            html.Label(f'{on_state_duration_file} minutes'),
+            html.Br(),
+            html.Label('Duration in "on" state (Range): '),
+            html.Label(f'{on_state_duration_range} minutes')
         ])
+        if selected_data:
+            selected_points = selected_data['points']
+            x_values = [point['x'] for point in selected_points]
+
+
+            # Get the data within the selected range
+            df_selected = df[(df.index >= min(x_values)) & (df.index <= max(x_values))]
+
+            on_state_duration_range = calculate_on_state_duration(df_selected)
+
+            # Modify duration_output if selected_data is present
+            duration_output = html.Div([
+                html.Label('Duration in "on" state (File): '),
+                html.Label(f'{on_state_duration_file} minutes'),
+                html.Br(),
+                html.Label('Duration in "on" state (Range): '),
+                html.Label(f'{on_state_duration_range} minutes')
+            ])
 
         return duration_output
+
     else:
         return {}
 
-def calculate_on_state_duration(df, config_dict):
+
+def calculate_on_state_duration(df):
     # Assuming 'Temp_extrema' column indicates the on state
 
     on_state = df[df['Temp_extrema'] == -1]
