@@ -6,6 +6,7 @@ import xgboost as xgb
 import plotly.graph_objects as go
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
+from sklearn.metrics import confusion_matrix, precision_recall_fscore_support
 
 from matplotlib.patches import Rectangle
 from scipy.signal import find_peaks
@@ -26,8 +27,116 @@ def create_output_directories():
             # Create the directory
             os.makedirs(os.path.join(os.getcwd(), my_path))
 
-def getting_extrema(df, col_name):
-    debug = 1
+
+# Function to evaluate predictions with a time tolerance
+def evaluate_with_tolerance(y, y_pred, tolerance):
+
+    total_samples = len(y)
+    true_positives = 0
+    false_positives = 0
+    false_negatives = 0
+
+    for i in range(total_samples):
+        start_index = max(0, i - tolerance)
+        end_index = min(total_samples, i + tolerance + 1)
+
+        # Check if any predictions within the tolerance window match the ground truth
+        if y[i] == 1:
+            if any(y_pred[start_index:end_index] == 1):
+                true_positives += 1
+            else:
+                false_negatives += 1
+        else:
+            if any(y_pred[start_index:end_index] == 1):
+                false_positives += 1
+
+    accuracy = (true_positives + total_samples - false_positives - false_negatives) / total_samples
+    precision = true_positives / (true_positives + false_positives + 1e-10)  # Adding a small value to avoid division by zero
+    recall = true_positives / (true_positives + false_negatives + 1e-10)  # Adding a small value to avoid division by zero
+    f1_score = 2 * (precision * recall) / (precision + recall + 1e-10)
+
+    print(f"Accuracy: {accuracy:.2f}")
+    print(f"Precision: {precision:.2f}")
+    print(f"Recall: {recall:.2f}")
+    print(f"F1 Score: {f1_score:.2f}")
+    return accuracy, precision, recall, f1_score
+
+def get_plotly_fig(df):
+
+    print(df.columns)
+    annotation_height = 0.1
+    bin_width = df.index[1] - df.index[0]
+    y_bottom = min(df['Temperature']) + annotation_height
+    y_top = max(df['Temperature']) - annotation_height
+
+    window_size = 2
+    df['Temp_smooth'] = df['Temperature'].rolling(window=window_size).mean()
+    df['Temp_smooth'].fillna(method='bfill', inplace=True)
+    min_temp = min(df['Temp_smooth'])
+
+    # Create the base line plot
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=df.index, y=df['Temp_smooth'], mode='lines', name='Temp'))
+    loc_max = df[df["Temp_extrema"] == -2].copy()
+    fig.add_trace(go.Scatter(x=loc_max.index, y=loc_max['Temp_smooth'], mode='markers', name='Local Maxima',
+                             marker=dict(color='red', symbol='circle')))
+    loc_min = df[df["Temp_extrema"] == 2].copy()
+    fig.add_trace(go.Scatter(x=loc_min.index, y=loc_min['Temp_smooth'], mode='markers', name='Local Minima',
+                             marker=dict(color='green', symbol='circle')))
+
+    color_map = {-1: "orange", 1: "yellow", 2: 'red', -2: 'green'}
+#
+    #anno_map = {-1: "Down trend", 1: "Up trend", 2: 'Loc Max', -2: 'Loc Min'}
+    ## Add rectangles and legend handles
+    #legend_handles = []
+    print('Start processing annotation. Please wait...')
+    for value, color in color_map.items():
+        print(value)
+        subset = df[df['Temp_extrema'] == value]
+        for index, row in subset.iterrows():
+            bin_start = index - bin_width / 2
+            bin_end = index + bin_width / 2
+            fig.add_shape(type="rect", x0=bin_start, y0=min_temp-0.5, x1=bin_end, y1=min_temp,
+                          line=dict(color=color, width=1), fillcolor=color_map[value], opacity=0.4)
+    print('Done.')
+        #legend_handles.append(go.Scatter(x=[None], y=[None], mode='markers',
+        #                                 marker=dict(color=color, size=0), name=color_map[value]))
+    ## Adjust the layout
+    #fig.update_layout(
+    #    legend=dict(orientation="h", yanchor="top", y=1.05, xanchor="center", x=0.5),
+    #    xaxis=dict(title='Timestamp'),
+    #    yaxis=dict(title='Temperature'),
+    #    title='Temperature Extrema Visualization'
+    #)
+
+    #fig.add_trace(go.Scatter(x=alternating_temperatures.index[0::2], y=alternating_temperatures[0::2], mode='markers', name='Local Maxima',
+    #                         marker=dict(color='red', symbol='circle')))
+    #fig.add_trace(go.Scatter(x=alternating_temperatures.index[1::2], y=alternating_temperatures[1::2], mode='markers', name='Local Minima',
+     #                        marker=dict(color='green', symbol='circle')))
+    #color_map = {-1: "#41b6c4", 1: "#2c7fb8", 2: 'red', -2: 'green'}
+    #anno_map = {-1: "Down trend", 1: "Up trend", 2: 'Loc Max', -2: 'Loc Min'}
+    ## Add rectangles and legend handles
+    #legend_handles = []
+    #for value, color in color_map.items():
+    #    subset = df[df['Temp_extrema'] == value]
+    #    for index, row in subset.iterrows():
+    #        bin_start = index - bin_width / 2
+    #        bin_end = index + bin_width / 2
+    #        fig.add_shape(type="rect", x0=bin_start, y0=y_bottom, x1=bin_end, y1=y_top,
+    #                      line=dict(color=color, width=1), fillcolor=color_map[value], opacity=0.4)
+    #    legend_handles.append(go.Scatter(x=[None], y=[None], mode='markers',
+    #                                     marker=dict(color=color, size=0), name=anno_map[value]))
+    ## Adjust the layout
+    #fig.update_layout(
+    #    legend=dict(orientation="h", yanchor="top", y=1.05, xanchor="center", x=0.5),
+    #    xaxis=dict(title='Timestamp'),
+    #    yaxis=dict(title='Temperature'),
+    #    title='Temperature Extrema Visualization'
+    #)
+    return fig
+
+def getting_extrema(df, col_name, file_id):
+    debug = 0
     window_size = 2
     df['Temp_smooth'] = df['Temperature'].rolling(window=window_size).mean()
     df['Temp_smooth'].fillna(method='bfill', inplace=True)
@@ -53,51 +162,110 @@ def getting_extrema(df, col_name):
     df.loc[alternating_temperatures.index[1::2], 'Temp_extrema'] = -2
 
 
-
     if debug:
+
         annotation_height = 0.1
         bin_width = df.index[1] - df.index[0]
-        y_bottom = min(df['Temperature'])+annotation_height
-        y_top = max(df['Temperature'])-annotation_height
+        y_bottom = min(df['Temperature']) + annotation_height
+        y_top = max(df['Temperature']) - annotation_height
 
+        # Create the base line plot
+        fig = go.Figure()
 
-        fig, ax1 = plt.subplots(1, 1, figsize=(10, 6))
-        ax1.plot(df['Temp_smooth'])
-        ax1.plot(alternating_temperatures[0::2],marker='o',color='r', linestyle='')
-        ax1.plot(alternating_temperatures[1::2],marker='o',color='g', linestyle='')
+        fig.add_trace(go.Scatter(x=df.index, y=df['Temp_smooth'], mode='lines', name='Temp_smooth'))
+        fig.add_trace(go.Scatter(x=alternating_temperatures.index[0::2], y=alternating_temperatures[0::2], mode='markers', name='Local Maxima',
+                                 marker=dict(color='red', symbol='circle')))
+        fig.add_trace(go.Scatter(x=alternating_temperatures.index[1::2], y=alternating_temperatures[1::2], mode='markers', name='Local Minima',
+                                 marker=dict(color='green', symbol='circle')))
+
         color_map = {-1: "#41b6c4", 1: "#2c7fb8", 2: 'red', -2: 'green'}
         anno_map = {-1: "Down trend", 1: "Up trend", 2: 'Loc Max', -2: 'Loc Min'}
-        for value in color_map.keys():
-            subset = df[df['Temp_extrema'] == value]
 
-            for index, row in subset.iterrows():
-                bin_start = index - bin_width / 2  # Half bin before
-                bin_end = index + bin_width / 2  # Half bin after
-                rect_bottom = Rectangle((bin_start, y_bottom), bin_width, annotation_height,
-                                        color=color_map[value])
-                ax1.add_patch(rect_bottom)
-                rect_top = Rectangle((bin_start, y_top), bin_width, annotation_height,
-                                     color=color_map[value])
-                ax1.add_patch(rect_top)
-                rect_between = Rectangle((bin_start, y_bottom), bin_width, y_top-y_bottom,
-                                         color=color_map[value], alpha=0.4)
-                ax1.add_patch(rect_between)
-
-        # Create legend handles for the annotation colors
-
+        # Add rectangles and legend handles
         legend_handles = []
         for value, color in color_map.items():
-            legend_handles.append(mpatches.Patch(color=color, label=anno_map[value]))
+            subset = df[df['Temp_extrema'] == value]
+            for index, row in subset.iterrows():
+                bin_start = index - bin_width / 2
+                bin_end = index + bin_width / 2
 
-        plt.legend(handles=legend_handles)
+                fig.add_shape(type="rect", x0=bin_start, y0=y_bottom, x1=bin_end, y1=y_top,
+                              line=dict(color=color, width=1), fillcolor=color_map[value], opacity=0.4)
 
-        plt.grid()
-        plt.show()
-        plt.savefig(os.path.join('plots','Extrema.png'))
+            legend_handles.append(go.Scatter(x=[None], y=[None], mode='markers',
+                                             marker=dict(color=color, size=0), name=anno_map[value]))
+
+        # Adjust the layout
+        fig.update_layout(
+            legend=dict(orientation="h", yanchor="top", y=1.05, xanchor="center", x=0.5),
+            xaxis=dict(title='Timestamp'),
+            yaxis=dict(title='Temperature'),
+            title='Temperature Extrema Visualization'
+        )
+        fig.write_html(os.path.join('plotly','Extrema_{}.html'.format(file_id)))
+
+    #if debug:
+    #    annotation_height = 0.1
+    #    bin_width = df.index[1] - df.index[0]
+    #    y_bottom = min(df['Temperature'])+annotation_height
+    #    y_top = max(df['Temperature'])-annotation_height
+
+
+    #    fig, ax1 = plt.subplots(1, 1, figsize=(10, 6))
+    #    ax1.plot(df['Temp_smooth'])
+    #    ax1.plot(alternating_temperatures[0::2],marker='o',color='r', linestyle='')
+    #    ax1.plot(alternating_temperatures[1::2],marker='o',color='g', linestyle='')
+    #    color_map = {-1: "#41b6c4", 1: "#2c7fb8", 2: 'red', -2: 'green'}
+    #    anno_map = {-1: "Down trend", 1: "Up trend", 2: 'Loc Max', -2: 'Loc Min'}
+    #    for value in color_map.keys():
+    #        subset = df[df['Temp_extrema'] == value]
+
+    #        for index, row in subset.iterrows():
+    #            bin_start = index - bin_width / 2  # Half bin before
+    #            bin_end = index + bin_width / 2  # Half bin after
+    #            rect_bottom = Rectangle((bin_start, y_bottom), bin_width, annotation_height,
+    #                                    color=color_map[value])
+    #            ax1.add_patch(rect_bottom)
+    #            rect_top = Rectangle((bin_start, y_top), bin_width, annotation_height,
+    #                                 color=color_map[value])
+    #            ax1.add_patch(rect_top)
+    #            rect_between = Rectangle((bin_start, y_bottom), bin_width, y_top-y_bottom,
+    #                                     color=color_map[value], alpha=0.4)
+    #            ax1.add_patch(rect_between)
+
+    #    # Create legend handles for the annotation colors
+
+    #    legend_handles = []
+    #    for value, color in color_map.items():
+    #        legend_handles.append(mpatches.Patch(color=color, label=anno_map[value]))
+
+    #    plt.legend(handles=legend_handles)
+
+    #    plt.grid()
+    #    plt.show()
+    #    plt.savefig(os.path.join('plots','Extrema.png'))
 
     return df
 
-def get_training_data_between(filename,
+def get_data(filename):
+    file_type = 'Test'
+    df, col_name_dict = import_xlsx_to_df(filename,
+                                          timestamp_col_name='DateTime_EAT',
+                                          temp_col_name='Celsius',
+                                          gt_col_name='Use_event',
+                                          gt_start_col_name='use_start',
+                                          gt_end_col_name='use_end',
+                                          batch_col_name='batch')
+
+    start_datetime = df.index[0]
+    stop_datetime = df.index[-1]
+
+    df = get_training_data_between(filename, file_type,
+                                   start_datetime = start_datetime,
+                                   stop_datetime = stop_datetime)
+    return df
+
+def get_training_data_between(filename, file_type,
                               start_datetime = pd.to_datetime('2022-01-01 00:00:00'),
                               stop_datetime = pd.to_datetime('2025-01-01 00:00:00')):
 
@@ -108,8 +276,10 @@ def get_training_data_between(filename,
                                           gt_start_col_name='use_start',
                                           gt_end_col_name='use_end',
                                           batch_col_name='batch')
+
     df_filtered = select_date_time_range_from_df(df, start_datetime, stop_datetime)
     df_filtered.reset_index(inplace=True)
+
 
     col_mapping = {'Celsius': 'Temperature', 'Use_event': 'GroundTruth'}
     df_filtered = df_filtered.rename(columns=col_mapping)
@@ -119,10 +289,9 @@ def get_training_data_between(filename,
     window_size = 15
     df_filtered_resampled['Temp_Rolling_Mean'] = df_filtered_resampled['Temperature'].rolling(window=window_size).mean()
     df_filtered_resampled['Temp_Rolling_Mean'].fillna(method='bfill', inplace=True)
-
     df_filtered_resampled['Temp_diff'] = df_filtered_resampled['Temperature'].diff()
     df_filtered_resampled['Temp_diff'].fillna(method='bfill', inplace=True)
-    df_filtered_resampled = getting_extrema(df_filtered_resampled, 'Temperature')
+    df_filtered_resampled = getting_extrema(df_filtered_resampled, 'Temperature', file_type)
 
     return df_filtered_resampled[['Temperature', 'Temp_diff', 'Temp_Rolling_Mean', 'Temp_extrema', 'GroundTruth']]
 
@@ -170,7 +339,7 @@ def my_local_extrema():
     run_file_id = '01'
     feature_list = ['Temperature', 'Temp_diff', 'Temp_Rolling_Mean']
     data_files = {key: os.path.join('data', '{}.xlsx'.format(value)) for key, value in file_names.items()}
-    data_train = get_training_data_between(data_files[run_file_id],
+    data_train = get_training_data_between(data_files[run_file_id], 'Train',
                               start_datetime = pd.to_datetime('2023-01-13 10:49:00'),
                               stop_datetime = pd.to_datetime('2023-01-13 18:00:00'))
 
@@ -179,13 +348,13 @@ def my_local_extrema():
     y_pred_train = data_train['Temp_extrema']!=1
 
     # Make predictions
-    data_test = get_training_data_between(data_files[run_file_id],
+    data_test = get_training_data_between(data_files[run_file_id], 'Test',
                               start_datetime = pd.to_datetime('2023-02-02 08:44:00'),
                               stop_datetime = pd.to_datetime('2023-02-02 13:49:00'))
 
     # Making predictions on the test set
     y_test = data_test['GroundTruth']
-    y_pred_test = data_test['Temp_extrema']!=1
+    y_pred_test = np.where((data_test['Temp_extrema']==-1) | (data_test['Temp_extrema']==-2), 1, 0)
 
 
     # Evaluate accuracy, precision, recall, and F1-score On Train
@@ -233,7 +402,7 @@ def my_local_extrema():
                 'Recall': [recall_train, recall_test],
                 'F1': [f1_train, f1_test]}
 
-    return res_dict
+    return y_test, y_pred_test, res_dict
 
 
 def my_logistic_regression():
@@ -246,7 +415,7 @@ def my_logistic_regression():
     run_file_id = '01'
     feature_list = ['Temperature', 'Temp_diff', 'Temp_extrema']
     data_files = {key: os.path.join('data', '{}.xlsx'.format(value)) for key, value in file_names.items()}
-    data_train = get_training_data_between(data_files[run_file_id],
+    data_train = get_training_data_between(data_files[run_file_id], 'Train',
                               start_datetime = pd.to_datetime('2023-01-13 10:49:00'),
                               stop_datetime = pd.to_datetime('2023-01-13 18:00:00'))
 
@@ -280,21 +449,21 @@ def my_logistic_regression():
 
 
     # Make predictions on Test set
-    data_test = get_training_data_between(data_files[run_file_id],
+    data_test = get_training_data_between(data_files[run_file_id], 'Test',
                               start_datetime = pd.to_datetime('2023-02-02 08:44:00'),
                               stop_datetime = pd.to_datetime('2023-02-02 13:49:00'))
     X_test = data_test[feature_list]  # Features
     y_test = data_test['GroundTruth']    # Target
-    y_pred = model.predict(X_test)
+    y_pred_test = model.predict(X_test)
 
     # Evaluate accuracy, precision, recall, and F1-score on Test data
-    accuracy_test = accuracy_score(y_test, y_pred)
-    precision_test = precision_score(y_test, y_pred)
-    recall_test = recall_score(y_test, y_pred)
-    f1_test = f1_score(y_test, y_pred)
+    accuracy_test = accuracy_score(y_test, y_pred_test)
+    precision_test = precision_score(y_test, y_pred_test)
+    recall_test = recall_score(y_test, y_pred_test)
+    f1_test = f1_score(y_test, y_pred_test)
 
     df_eval = data_test[['Temperature', 'Temp_diff', 'GroundTruth']]
-    df_eval['Prediction'] = y_pred
+    df_eval['Prediction'] = y_pred_test
 
     col_name_dict = {'temp_col_name': 'Temperature', 'gt_col_name': 'GroundTruth', 'pred_col_name': 'Prediction'}
     dict_for_plot_title = {'file': [run_file_id,file_names[run_file_id]],
@@ -314,7 +483,7 @@ def my_logistic_regression():
                 'Precision': [precision_train, precision_test],
                 'Recall': [recall_train, recall_test],
                 'F1': [f1_train, f1_test]}
-    return res_dict
+    return y_test, y_pred_test, res_dict
 
 
 def my_xgb():
@@ -328,7 +497,7 @@ def my_xgb():
     feature_list = ['Temperature', 'Temp_diff', 'Temp_extrema']
 
     data_files = {key: os.path.join('data', '{}.xlsx'.format(value)) for key, value in file_names.items()}
-    data_train = get_training_data_between(data_files[run_file_id],
+    data_train = get_training_data_between(data_files[run_file_id], 'Train',
                               start_datetime = pd.to_datetime('2023-01-13 10:49:00'),
                               stop_datetime = pd.to_datetime('2023-01-13 18:00:00'))
 
@@ -337,7 +506,7 @@ def my_xgb():
     y_train = data_train['GroundTruth']    # Target
 
     # Make predictions
-    data_test = get_training_data_between(data_files[run_file_id],
+    data_test = get_training_data_between(data_files[run_file_id], 'Test',
                               start_datetime = pd.to_datetime('2023-02-02 08:44:00'),
                               stop_datetime = pd.to_datetime('2023-02-02 13:49:00'))
 
@@ -424,7 +593,7 @@ def my_xgb():
                 'Recall': [recall_train, recall_test],
                 'F1': [f1_train, f1_test]}
 
-    return res_dict
+    return y_test, y_pred_test, res_dict
 
 
 def resample_df(df, resample='1T'):
@@ -482,7 +651,7 @@ def plotly_data(df, col_name_dict, dict_for_plot_title):
     gt_col_name = col_name_dict.get('gt_col_name', '')
     pred_col_name = col_name_dict.get('pred_col_name', '')
 
-    # Setting the hight of the rectangles (from mean to max in case the prediction is present as well)
+    # Setting the height of the rectangles (from mean to max in case the prediction is present as well)
     # (from min to max if the prediction is not present)
     if pred_col_name:
         y0 = df[col_name_dict['temp_col_name']].mean()
