@@ -15,9 +15,20 @@ config_dict = {'smooth_factor': 5,
                'peak_prominence': 0.1,
                'timestamp_col_name':'DateTime_EAT',
                'temp_col_name':'Celsius',
-                'gt_col_name':'Use_event'}
+               'gt_col_name':'Use_event',
+               'detect_start_time': '08:00:00',
+               'detect_stop_time': '18:00:00'}
 
 def getting_extrema(temperatures, config_dict):
+
+    # selection of the start and stop times for which the extrema need to be considered
+    start_time = pd.to_datetime(config_dict['detect_start_time']).time()
+    stop_time = pd.to_datetime(config_dict['detect_stop_time']).time()
+    # Create a mask for values outside the time interval
+    mask = (temperatures.index.time < start_time) | (temperatures.index.time > stop_time)
+
+    # Set 'Temp_extrema' values to zero where the index falls outside the interval
+    temperatures.loc[mask] = temperatures.min()
     df = temperatures.to_frame().copy()
 
     maxima_indices, _ = find_peaks(temperatures,  distance=config_dict['dist_for_maxima'],
@@ -57,6 +68,17 @@ def getting_extrema(temperatures, config_dict):
     else:
         df['Temp_extrema'] = 1
 
+    # setting the Temp_extram value to 0 outside the selected (start-stop)-times
+    df.loc[mask,'Temp_extrema'] = 0
+
+    # print('Maxima:')
+    #
+    # for max_idx, row in df[df['Temp_extrema']==2].iterrows():
+    #    print('idx: {}, temp: {}, class:{}, '.format(max_idx.time(), row['Temp_smooth'], row['Temp_extrema']))
+    # print('Minima indeces:')
+    # for min_idx, row in df[df['Temp_extrema'] == -2].iterrows():
+    #    print('idx: {}, temp: {}, class:{}, '.format(min_idx.time(), row['Temp_smooth'], row['Temp_extrema']))
+
     return df['Temp_extrema']
 
 def get_data(filename, config_dict):
@@ -84,7 +106,8 @@ def get_plotly_fig(df, config_dict):
 
     # Create the base line plot
     fig = go.Figure()
-    fig.add_trace(go.Scatter(x=df.index, y=df['Temp_smooth'], mode='lines', name='Temp'))
+    fig.add_trace(go.Scatter(x=df.index, y=df['Temperature'], mode='lines', name='Temp Unaltered'))
+    fig.add_trace(go.Scatter(x=df.index, y=df['Temp_smooth'], mode='lines', name='Temp Smoothed'))
     loc_max = df[df["Temp_extrema"] == 2].copy()
     fig.add_trace(go.Scatter(x=loc_max.index, y=loc_max['Temp_smooth'], mode='markers', name='Local Maxima',
                              marker=dict(color='red', symbol='circle')))
@@ -94,7 +117,7 @@ def get_plotly_fig(df, config_dict):
 
     # pump is on when the Temp_extrema is between a maxima and a minima
     resolution_min = int(config_dict['resample_string'][:-1])
-    bin_width = pd.Timedelta(minutes=resolution_min)
+    bin_width = pd.Timedelta(minutes=resolution_min)/2
     min_temp = df['Temp_smooth'].min()
 
     y_pred = df['Temp_extrema']==-1
@@ -124,6 +147,8 @@ def get_plotly_fig(df, config_dict):
     return fig
 
 def get_start_stops(y):
+    print('get_start_stops')
+    print(y)
     groups = []
     for k, g in groupby(enumerate(y.index), lambda ix: ix[0] - ix[1].minute):
         timestamps = [ix[1] for ix in g]
@@ -131,7 +156,8 @@ def get_start_stops(y):
             groups.append((timestamps[0], timestamps[0]))
         else:
             groups.append((timestamps[0], timestamps[-1]))
-
+    print("result: groups")
+    print(groups)
     return groups
 
 
@@ -216,7 +242,13 @@ app.layout = html.Div([
             dcc.Input(id='temp-col-name', type='text', value=config_dict['temp_col_name']),
             html.Label('  ground truth col name: '),
             dcc.Input(id='gt-col-name', type='text', value=config_dict['gt_col_name']),
-        ]),
+        ], style={'margin-bottom': '20px'}),
+        html.Div([
+            html.Label('detect between start time: '),
+            dcc.Input(id='detect-between-start-time', type='text', value=config_dict['detect_start_time']),
+            html.Label('  detect between stop time: '),
+            dcc.Input(id='detect-between-stop-time', type='text', value=config_dict['detect_stop_time']),
+        ], style={'margin-bottom': '20px'}),
     ]),
 
     # Display the graph and duration output in separate Div elements
@@ -236,11 +268,13 @@ app.layout = html.Div([
      Input('peak-prominence', 'value'),
      Input('timestamp-col-name', 'value'),
      Input('temp-col-name', 'value'),
-     Input('gt-col-name', 'value')]
+     Input('gt-col-name', 'value'),
+     Input('detect-between-start-time', 'value'),
+     Input('detect-between-stop-time', 'value')]
 )
 def update_graph(selected_file, smooth_factor, resample_string,
                  dist_for_maxima, dist_for_minima, peak_prominence,
-                 timestamp_col_name, temp_col_name, gt_col_name):
+                 timestamp_col_name, temp_col_name, gt_col_name, detect_start_time, detect_stop_time):
     if selected_file:
         print('File selected is: {}'.format(selected_file))
         # Update config_dict values based on user input
@@ -252,6 +286,8 @@ def update_graph(selected_file, smooth_factor, resample_string,
         config_dict['timestamp_col_name'] = timestamp_col_name
         config_dict['temp_col_name'] = temp_col_name
         config_dict['gt_col_name'] = gt_col_name
+        config_dict['detect_start_time'] = detect_start_time
+        config_dict['detect_stop_time'] = detect_stop_time
         # Read data from the selected file using your read_data function
         # This assumes your read_data function takes the file name and returns a DataFrame
         df = get_data(os.path.join(data_directory, selected_file), config_dict)
@@ -273,33 +309,51 @@ def update_graph(selected_file, smooth_factor, resample_string,
 def update_duration_output(selected_file, selected_data):
     if selected_file:
         df = get_data(os.path.join(data_directory, selected_file), config_dict)
-        on_state_duration_file = calculate_on_state_duration(df)
-        on_state_duration_range = 0
+        on_state_duration_full, on_state_count_full, shortest_full, longest_full = calculate_on_state_duration(df)
 
         duration_output = html.Div([
-            html.Label('Duration in "on" state (File): '),
-            html.Label(f'{on_state_duration_file} minutes'),
-            html.Br(),
-            html.Label('Duration in "on" state (Range): '),
-            html.Label(f'{on_state_duration_range} minutes')
+            html.Label('"ON" duration: ', style={'margin-right': '5px'}),
+            html.Label(f'{on_state_duration_full} minutes', style={'margin-right': '20px'}),
+            html.Label('"ON" count: ', style={'margin-right': '5px'}),
+            html.Label(f'{on_state_count_full} times', style={'margin-right': '20px'}),
+            html.Label('Shortest: ', style={'margin-right': '5px'}),
+            html.Label(f'{shortest_full} minutes', style={'margin-right': '20px'}),
+            html.Label('Longest: ', style={'margin-right': '5px'}),
+            html.Label(f'{longest_full} minutes'),
+            #html.Br(),
+            #html.Label('"ON" duration (Box Selected Range): '),
+            #html.Label(f'{on_state_duration_range} minutes')
         ])
         if selected_data:
             selected_points = selected_data['points']
             x_values = [point['x'] for point in selected_points]
 
-
             # Get the data within the selected range
             df_selected = df[(df.index >= min(x_values)) & (df.index <= max(x_values))]
-
-            on_state_duration_range = calculate_on_state_duration(df_selected)
+            on_state_duration_range, on_state_count_range, shortest, longest = calculate_on_state_duration(df_selected)
 
             # Modify duration_output if selected_data is present
             duration_output = html.Div([
-                html.Label('Duration in "on" state (File): '),
-                html.Label(f'{on_state_duration_file} minutes'),
+                html.Label('"ON" duration: ', style={'margin-right': '5px'}),
+                html.Label(f'{on_state_duration_full} minutes', style={'margin-right': '20px'}),
+                html.Label('count: ', style={'margin-right': '5px'}),
+                html.Label(f'{on_state_count_full} times', style={'margin-right': '20px'}),
+                html.Label('Shortest: ', style={'margin-right': '5px'}),
+                html.Label(f'{shortest_full} minutes', style={'margin-right': '20px'}),
+                html.Label('Longest: ', style={'margin-right': '5px'}),
+                html.Label(f'{longest_full} minutes'),
                 html.Br(),
-                html.Label('Duration in "on" state (Range): '),
-                html.Label(f'{on_state_duration_range} minutes')
+                html.Br(),
+                html.Label('(Box Selected Range): '),
+                html.Br(),
+                html.Label('"ON" duration: ', style={'margin-right': '5px'}),
+                html.Label(f'{on_state_duration_range} minutes', style={'margin-right': '20px'}),
+                html.Label('count: ', style={'margin-right': '5px'}),
+                html.Label(f'{on_state_count_range} times', style={'margin-right': '20px'}),
+                html.Label('Shortest: ', style={'margin-right': '5px'}),
+                html.Label(f'{shortest} minutes', style={'margin-right': '20px'}),
+                html.Label('Longest: ', style={'margin-right': '5px'}),
+                html.Label(f'{longest} minutes'),
             ])
 
         return duration_output
@@ -313,9 +367,26 @@ def calculate_on_state_duration(df):
 
     on_state = df[df['Temp_extrema'] == -1]
     durations = []
+    count_blocks = 1
+    prev_stop = None
+    longest = None
+    shortest = None
+
     for start, stop in get_start_stops(on_state):
+        delta_time = pd.to_datetime(stop) - pd.to_datetime(start)
+
+        # Initialize shortest and longest with first delta_time
+        if longest is None or delta_time > longest:
+            longest = delta_time
+        if shortest is None or delta_time < shortest:
+            shortest = delta_time
+
+
+        prev_stop = stop
         durations.append((stop - start).seconds // 60)  # Convert seconds to minutes
-    return sum(durations)
+
+
+    return sum(durations), len(durations), int(shortest.total_seconds() // 60), int(longest.total_seconds() // 60)
 
 if __name__ == '__main__':
     app.run_server(debug=True)
