@@ -8,6 +8,7 @@ import plotly.graph_objects as go
 from dash.dependencies import Input, Output
 import os
 
+
 config_dict = {'smooth_factor': 5,
                'resample_string': '1T',
                'dist_for_maxima': 3,
@@ -18,6 +19,55 @@ config_dict = {'smooth_factor': 5,
                'gt_col_name':'Use_event',
                'detect_start_time': '08:00:00',
                'detect_stop_time': '18:00:00'}
+
+def get_alternating_values(maxima_indices, minima_indices):
+    merged_indices_res = []
+    source_info = []
+
+    max_idx = 0
+    min_idx = 0
+
+    while max_idx < len(maxima_indices) and min_idx < len(minima_indices):
+        max_val = maxima_indices[max_idx]
+        min_val = minima_indices[min_idx]
+
+        if min_val <= max_val:
+            merged_indices_res.append(min_val)
+            source_info.append('min')
+            min_idx += 1
+        else:
+            merged_indices_res.append(max_val)
+            source_info.append('max')
+            max_idx += 1
+
+    # Add the remaining elements from either list
+    merged_indices_res.extend(maxima_indices[max_idx:])
+    source_info.extend(['max'] * (len(maxima_indices) - max_idx))
+
+    merged_indices_res.extend(minima_indices[min_idx:])
+    source_info.extend(['min'] * (len(minima_indices) - min_idx))
+
+    successive_indices = []
+
+    # Loop through the indices to find successive elements
+    for i in range(len(source_info) - 1):
+        if source_info[i] == source_info[i + 1]:
+            successive_indices.append(i+1)
+
+    for i in successive_indices[::-1]:
+        removed = merged_indices_res.pop(i)
+        print('removed idx: {}, value: {}'.format(i, removed))
+
+    if merged_indices_res[0] == maxima_indices[0]:
+        max_is_first = 1
+    else:
+        max_is_first = 0
+
+    # check if the last is a maximum:  if so remove it from the list
+    if merged_indices_res[-1] == maxima_indices[-1]:
+        merged_indices_res.pop()
+
+    return merged_indices_res, max_is_first
 
 def getting_extrema(temperatures, config_dict):
 
@@ -36,14 +86,10 @@ def getting_extrema(temperatures, config_dict):
     minima_indices, _ = find_peaks(-temperatures,  prominence=config_dict['peak_prominence'],
                                    distance=config_dict['dist_for_minima'])
 
-    # Ensure alternating pattern: a maxima followed by a minima and vice versa
-    alternating_max_min = []
-    for i in range(min(len(minima_indices), len(maxima_indices))):
-        alternating_max_min.append(maxima_indices[i])
-        alternating_max_min.append(minima_indices[i])
 
-    # Generate an array with alternating maxima and minima
-    alternating_temperatures = temperatures[np.sort(alternating_max_min)]
+    alternating_max_min, max_is_first = get_alternating_values(maxima_indices, minima_indices)
+
+    alternating_temperatures = temperatures[alternating_max_min]
 
     if len(alternating_temperatures) >= 2:
         # find out if the first element in the alternating_temperatures is a min or a max by comparing its value with the
@@ -68,16 +114,8 @@ def getting_extrema(temperatures, config_dict):
     else:
         df['Temp_extrema'] = 1
 
-    # setting the Temp_extram value to 0 outside the selected (start-stop)-times
+    # setting the Temp_extrema value to 0 outside the selected (start-stop)-times
     df.loc[mask,'Temp_extrema'] = 0
-
-    # print('Maxima:')
-    #
-    # for max_idx, row in df[df['Temp_extrema']==2].iterrows():
-    #    print('idx: {}, temp: {}, class:{}, '.format(max_idx.time(), row['Temp_smooth'], row['Temp_extrema']))
-    # print('Minima indeces:')
-    # for min_idx, row in df[df['Temp_extrema'] == -2].iterrows():
-    #    print('idx: {}, temp: {}, class:{}, '.format(min_idx.time(), row['Temp_smooth'], row['Temp_extrema']))
 
     return df['Temp_extrema']
 
@@ -147,8 +185,7 @@ def get_plotly_fig(df, config_dict):
     return fig
 
 def get_start_stops(y):
-    print('get_start_stops')
-    print(y)
+
     groups = []
     for k, g in groupby(enumerate(y.index), lambda ix: ix[0] - ix[1].minute):
         timestamps = [ix[1] for ix in g]
@@ -156,8 +193,7 @@ def get_start_stops(y):
             groups.append((timestamps[0], timestamps[0]))
         else:
             groups.append((timestamps[0], timestamps[-1]))
-    print("result: groups")
-    print(groups)
+
     return groups
 
 
@@ -221,10 +257,9 @@ app.layout = html.Div([
     html.Div([
         html.Div([
             html.Label('Smooth Factor: '),
-            dcc.Input(id='smooth-factor', type='number', value=config_dict['smooth_factor'], style={'width': '40px'}),
-            html.Label(''),
-            dcc.Input(style={'width': '50px'}, disabled=True),
-            html.Label('  Resample String: '),
+            dcc.Input(id='smooth-factor', type='number', value=config_dict['smooth_factor'], style={'width': '30px'}),
+
+            html.Label('  Resample String:'),
             dcc.Input(id='resample-string', type='text', value=config_dict['resample_string'], style={'width': '40px'}),
         ], style={'margin-bottom': '20px'}),  # Add bottom margin to create spac
         html.Div([
@@ -309,12 +344,16 @@ def update_graph(selected_file, smooth_factor, resample_string,
 def update_duration_output(selected_file, selected_data):
     if selected_file:
         df = get_data(os.path.join(data_directory, selected_file), config_dict)
+        data_sampling = (df.index[1]-df.index[0]).total_seconds() // 60
         on_state_duration_full, on_state_count_full, shortest_full, longest_full = calculate_on_state_duration(df)
 
         duration_output = html.Div([
+            html.Label('Original Data Sampling: ', style={'margin-right': '5px'}),
+            html.Label(f'{data_sampling} minutes', style={'margin-right': '20px'}),
+            html.Br(),
             html.Label('"ON" duration: ', style={'margin-right': '5px'}),
             html.Label(f'{on_state_duration_full} minutes', style={'margin-right': '20px'}),
-            html.Label('"ON" count: ', style={'margin-right': '5px'}),
+            html.Label('count: ', style={'margin-right': '5px'}),
             html.Label(f'{on_state_count_full} times', style={'margin-right': '20px'}),
             html.Label('Shortest: ', style={'margin-right': '5px'}),
             html.Label(f'{shortest_full} minutes', style={'margin-right': '20px'}),
@@ -328,12 +367,20 @@ def update_duration_output(selected_file, selected_data):
             selected_points = selected_data['points']
             x_values = [point['x'] for point in selected_points]
 
+            x_values_min = min(x_values)
+            x_values_max = max(x_values)
+            if pd.to_datetime(x_values_min).date() == pd.to_datetime(x_values_max).date():
+                x_values_max = pd.to_datetime(x_values_max).time()
+
             # Get the data within the selected range
             df_selected = df[(df.index >= min(x_values)) & (df.index <= max(x_values))]
             on_state_duration_range, on_state_count_range, shortest, longest = calculate_on_state_duration(df_selected)
 
             # Modify duration_output if selected_data is present
             duration_output = html.Div([
+                html.Label('Original Data Sampling: ', style={'margin-right': '5px'}),
+                html.Label(f'{data_sampling} minutes', style={'margin-right': '20px'}),
+                html.Br(),
                 html.Label('"ON" duration: ', style={'margin-right': '5px'}),
                 html.Label(f'{on_state_duration_full} minutes', style={'margin-right': '20px'}),
                 html.Label('count: ', style={'margin-right': '5px'}),
@@ -344,7 +391,7 @@ def update_duration_output(selected_file, selected_data):
                 html.Label(f'{longest_full} minutes'),
                 html.Br(),
                 html.Br(),
-                html.Label('(Box Selected Range): '),
+                html.Label('Box Selected Range: {} - {}'.format(x_values_min, x_values_max)),
                 html.Br(),
                 html.Label('"ON" duration: ', style={'margin-right': '5px'}),
                 html.Label(f'{on_state_duration_range} minutes', style={'margin-right': '20px'}),
@@ -367,12 +414,12 @@ def calculate_on_state_duration(df):
 
     on_state = df[df['Temp_extrema'] == -1]
     durations = []
-    count_blocks = 1
-    prev_stop = None
+
     longest = None
     shortest = None
-
+    print('Calculate_on_state_duration')
     for start, stop in get_start_stops(on_state):
+        print(start, stop)
         delta_time = pd.to_datetime(stop) - pd.to_datetime(start)
 
         # Initialize shortest and longest with first delta_time
@@ -381,8 +428,6 @@ def calculate_on_state_duration(df):
         if shortest is None or delta_time < shortest:
             shortest = delta_time
 
-
-        prev_stop = stop
         durations.append((stop - start).seconds // 60)  # Convert seconds to minutes
 
 
