@@ -71,56 +71,21 @@ def get_alternating_values(maxima_indices, minima_indices):
 
 def getting_extrema(temperatures, config_dict):
 
-    # the following is/was a variable that can be set to 1 to try the list of masks (but did not work so far)
-    create_list = 0
-
     # selection of the start and stop times for which the extrema need to be considered
     start_time = pd.to_datetime(config_dict['detect_start_time']).time()
     stop_time = pd.to_datetime(config_dict['detect_stop_time']).time()
 
-    if create_list:
-        # Get unique dates from the DataFrame
-        unique_dates = pd.Series(temperatures.index).dt.date.unique()
-        print('unique dates')
-        print(unique_dates)
-
-        #creating a list of masks per unique date
-        mask_list = []
-
-        # Create masks for each unique date from the DataFrame based on start and stop times
-        for date in unique_dates:
-            start_datetime = pd.to_datetime(str(date) + ' ' + str(start_time))
-            stop_datetime = pd.to_datetime(str(date) + ' ' + str(stop_time))
-
-            mask = (temperatures.index >= start_datetime) & (temperatures.index <= stop_datetime)
-            mask_list.append(mask)
-
-            # Set 'Temp_extrema' values to zero where the index falls outside the interval
-            temperatures.loc[mask] = temperatures.min()
-        print('temperatures')
-        print(temperatures)
-
-    if not create_list:
-        # Create a mask for values outside the time interval
-        mask = (temperatures.index.time < start_time) | (temperatures.index.time > stop_time)
-        print('mask')
-        print(mask)
+    # Create a mask for values outside the time interval
+    mask = (temperatures.index.time < start_time) | (temperatures.index.time > stop_time)
 
     # Set 'Temp_extrema' values to zero where the index falls outside the interval
-    #temperatures.loc[mask] = temperatures.min()
+    temperatures.loc[mask] = temperatures.min()
     df = temperatures.to_frame().copy()
 
     maxima_indices, _ = find_peaks(temperatures,  distance=config_dict['dist_for_maxima'],
                                    prominence=config_dict['peak_prominence'])
     minima_indices, _ = find_peaks(-temperatures,  prominence=config_dict['peak_prominence'],
                                    distance=config_dict['dist_for_minima'])
-
-
-    print('max_indices')
-    print(maxima_indices)
-
-    print('min_indices')
-    print(minima_indices)
 
 
     alternating_max_min, max_is_first = get_alternating_values(maxima_indices, minima_indices)
@@ -150,12 +115,20 @@ def getting_extrema(temperatures, config_dict):
     else:
         df['Temp_extrema'] = 1
 
-    if create_list:
-        # setting the Temp_extrema value to 0 outside the selected (start-stop)-times
-        for mask in mask_list:
-            df.loc[mask,'Temp_extrema'] = 0
-    else:
-        df.loc[mask,'Temp_extrema'] = 0
+    df.loc[mask,'Temp_extrema'] = 0
+
+    # Find the index of the first occurrence of value 2 in 'Temp_extrema' column
+    index_first_value_positive_2 = df.index[df['Temp_extrema'] == 2].min()
+    index_last_value_negative_2 = df.index[df['Temp_extrema'] == -2].max()
+
+
+    if index_first_value_positive_2 is not pd.NaT:
+        # Set values before the first occurrence of 2 to 0
+        df.loc[df.index < index_first_value_positive_2, 'Temp_extrema'] = 0
+
+    if index_last_value_negative_2 is not pd.NaT:
+        # Set values before the first occurrence of 2 to 0
+        df.loc[df.index > index_last_value_negative_2, 'Temp_extrema'] = 0
 
     return df['Temp_extrema']
 
@@ -457,9 +430,8 @@ def calculate_on_state_duration(df):
 
     longest = None
     shortest = None
-    print('Calculate_on_state_duration')
+
     for start, stop in get_start_stops(on_state):
-        print(start, stop)
         delta_time = pd.to_datetime(stop) - pd.to_datetime(start)
 
         # Initialize shortest and longest with first delta_time
