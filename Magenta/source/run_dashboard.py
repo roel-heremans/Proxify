@@ -7,6 +7,7 @@ from dash import dcc, html
 import plotly.graph_objects as go
 from dash.dependencies import Input, Output
 import os
+
 from utils.dash_utils import get_alternating_values, getting_extrema, get_data, get_plotly_fig, get_start_stops, \
     import_xlsx_to_df, resample_df
 
@@ -18,6 +19,7 @@ config_dict = {'file_dropdown': ' ',
                'dist_for_maxima': 3,
                'dist_for_minima': 3,
                'peak_prominence': 0.1,
+               'ambient_h2o_dropdown': 'amb_gt_h2o',
                'res_thres_plus': 0.5,
                'res_thres_minus': -0.5,
                'timestamp_col_name':'DateTime_EAT',
@@ -59,6 +61,15 @@ app.layout = html.Div([
             dcc.Input(id='dist-for-minima', type='number', value=config_dict['dist_for_minima'], style={'width': '40px'}),
             html.Label('  prominence: '),
             dcc.Input(id='peak-prominence', type='number', value=config_dict['peak_prominence'], style={'width': '40px'}),
+            html.Label(' Select Option:'),
+            dcc.Dropdown(
+                id='ambient-h2o-dropdown',
+                options=[
+                    {'label': 'Ambient > H2O Temp', 'value': 'amb_gt_h2o'},
+                    {'label': 'Ambient < H2O Temp', 'value': 'amb_lt_h2o'}
+                ],
+                value='amb_gt_h2o', # Default Value
+                style={'display': 'inline-block', 'width': '200px'}),
         ], style={'margin-bottom': '20px'}),
         html.Div([
             html.Label('Threshold Seasonal Residu (+): '),
@@ -98,6 +109,7 @@ app.layout = html.Div([
      Input('dist-for-maxima', 'value'),
      Input('dist-for-minima', 'value'),
      Input('peak-prominence', 'value'),
+     Input('ambient-h2o-dropdown', 'value'),
      Input('res-thres-plus', 'value'),
      Input('res-thres-minus', 'value'),
      Input('timestamp-col-name', 'value'),
@@ -107,7 +119,8 @@ app.layout = html.Div([
      Input('detect-between-stop-time', 'value')]
 )
 def update_graph(selected_file, smooth_factor, resample_string, poly_fit_deg,
-                 dist_for_maxima, dist_for_minima, peak_prominence, res_thres_plus, res_thres_minus,
+                 dist_for_maxima, dist_for_minima, peak_prominence, ambient_h2o_dropdown,
+                 res_thres_plus, res_thres_minus,
                  timestamp_col_name, temp_col_name, gt_col_name, detect_start_time, detect_stop_time):
 
     if selected_file:
@@ -120,6 +133,7 @@ def update_graph(selected_file, smooth_factor, resample_string, poly_fit_deg,
         config_dict['dist_for_maxima'] = dist_for_maxima
         config_dict['dist_for_minima'] = dist_for_minima
         config_dict['peak_prominence'] = peak_prominence
+        config_dict['ambient_h2o_dropdown'] = ambient_h2o_dropdown
         config_dict['res_thres_plus'] = res_thres_plus
         config_dict['res_thres_minus'] = res_thres_minus
         config_dict['timestamp_col_name'] = timestamp_col_name
@@ -132,7 +146,7 @@ def update_graph(selected_file, smooth_factor, resample_string, poly_fit_deg,
         df = get_data(os.path.join(data_directory, selected_file), config_dict)
 
         # generate graph
-        fig = get_plotly_fig(df, config_dict)
+        fig, res_dict = get_plotly_fig(df, config_dict)
 
         return fig
     else:
@@ -149,11 +163,12 @@ def update_graph(selected_file, smooth_factor, resample_string, poly_fit_deg,
      Input('dist-for-maxima', 'value'),
      Input('dist-for-minima', 'value'),
      Input('peak-prominence', 'value'),
+     Input('ambient-h2o-dropdown', 'value'),
      Input('detect-between-start-time', 'value'),
      Input('detect-between-stop-time', 'value')]
 )
 def update_duration_output(selected_file, selected_data, smooth_factor, resample_string, poly_fit_deg, dist_for_maxima,
-                           dist_for_minima, peak_prominence, detect_start_time, detect_stop_time):
+                           dist_for_minima, peak_prominence, ambient_h2o_dropdown, detect_start_time, detect_stop_time):
     if selected_file:
         df = get_data(os.path.join(data_directory, selected_file), config_dict)
         data_sampling = (df.index[1]-df.index[0]).total_seconds() // 60

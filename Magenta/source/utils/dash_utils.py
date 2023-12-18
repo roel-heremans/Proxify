@@ -4,8 +4,18 @@ from itertools import groupby
 from scipy.signal import find_peaks
 import plotly.graph_objects as go
 from statsmodels.tsa.seasonal import seasonal_decompose
+from datetime import timedelta
 
 def get_alternating_values(maxima_indices, minima_indices):
+    '''
+    This function serves to get alternating values between maxima_indices and minima_indices. For instance:
+    maxima_indices = [13, 22, 24, 38]
+    minima_indices = [15, 27, 42, 53]
+    the result would be [13, 15, 22, 27, 38, 42]
+    :param maxima_indices: list that contains the indices where the maxima are located
+    :param minima_indices: list that contians the indices where the minma are located
+    :return: list that contains the alternating indices between max and minima or between min and maxima
+    '''
     merged_indices_res = []
     source_info = []
 
@@ -39,6 +49,8 @@ def get_alternating_values(maxima_indices, minima_indices):
         if source_info[i] == source_info[i + 1]:
             successive_indices.append(i+1)
 
+    # indices would not correspond anymore to the one mentioned by successive _indices when doing this operation from
+    # the beginning to the end, need to do this from last to first, hence [::-1]
     for i in successive_indices[::-1]:
         removed = merged_indices_res.pop(i)
         #print('removed idx: {}, value: {}'.format(i, removed))
@@ -49,8 +61,12 @@ def get_alternating_values(maxima_indices, minima_indices):
         max_is_first = 0
 
     # check if the last is a maximum:  if so remove it from the list
-    if merged_indices_res[-1] == maxima_indices[-1]:
-        merged_indices_res.pop()
+    if max_is_first:
+        if merged_indices_res[-1] in maxima_indices:
+            merged_indices_res.pop()
+    else:
+        if merged_indices_res[-1] in minima_indices:
+            merged_indices_res.pop()
 
     return merged_indices_res, max_is_first
 
@@ -67,10 +83,10 @@ def getting_extrema(temperatures, config_dict):
     temperatures.loc[mask] = temperatures.min()
     df = temperatures.to_frame().copy()
 
-    maxima_indices, _ = find_peaks(temperatures,  distance=config_dict['dist_for_maxima'],
-                                   prominence=config_dict['peak_prominence'])
-    minima_indices, _ = find_peaks(-temperatures,  prominence=config_dict['peak_prominence'],
-                                   distance=config_dict['dist_for_minima'])
+    maxima_indices, _ = find_peaks(temperatures,
+                                   distance=config_dict['dist_for_maxima'], prominence=config_dict['peak_prominence'])
+    minima_indices, _ = find_peaks(-temperatures,
+                                   distance=config_dict['dist_for_minima'], prominence=config_dict['peak_prominence'])
 
     alternating_max_min, max_is_first = get_alternating_values(maxima_indices, minima_indices)
 
@@ -130,23 +146,30 @@ def get_data(filename, config_dict):
 
     df= df.rename(columns=col_mapping)
 
+    # Put sampling frequency of incoming data to the Value writting in the Resample String: "1T" means each minute,
+    # '5T' each 5 minutes,...
+    df = resample_df(df, resample=config_dict['resample_string'])
+    df['Temperature'].fillna(method='bfill', inplace=True)
+    df['Temperature'].fillna(method='ffill', inplace=True)
+
     print('Polynomial fit (degree = {})'.format(type(config_dict['poly_fit_deg'])))
     # proxy for the ambient temperature
     polynome = get_poly_fit(np.arange(len(df)),df['Temperature'].values,config_dict['poly_fit_deg'])
     df['poly_fit'] = polynome(np.arange(len(df)))
 
 
-    df = resample_df(df, resample=config_dict['resample_string'])
-    df['Temperature'].fillna(method='bfill', inplace=True)
-    df['Temperature'].fillna(method='ffill', inplace=True)
-
     df['Temp_smooth'] = df['Temperature'].rolling(window=config_dict['smooth_factor']).mean()
-    # Shift the rolling mean by half the window size backward
+
+    # Shift the rolling mean by half the window size backward (this is possible because we are analyzing off-line)
     half_window_shift = config_dict['smooth_factor'] // 2
     df['Temp_smooth'] = df['Temp_smooth'].shift(-half_window_shift)
     df['Temp_smooth'].fillna(method='bfill', inplace=True)
 
+
     df_extrema = getting_extrema(df['Temp_smooth'], config_dict)
+
+    print('config_dict')
+    print(config_dict)
     df = pd.concat([df, df_extrema], axis=1)
 
     temperature_series = df['Temperature']
@@ -175,6 +198,8 @@ def get_data(filename, config_dict):
 
 def get_plotly_fig(df, config_dict):
 
+    result_extrema = {}
+    result_seasonal = {}
     # Create the base line plot
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=df.index, y=df['Temperature'], mode='lines', name='Temp Unaltered'))
@@ -182,8 +207,8 @@ def get_plotly_fig(df, config_dict):
                              name='Temp Ambient Proxy (poly-{})'.format(config_dict['poly_fit_deg'])))
     start_index = df[df['Temp_extrema']!=0].index[0]
     end_index = df[df['Temp_extrema']!=0].index[-1]
-    fig.add_trace(go.Scatter(x=df.loc[start_index:end_index].index, y=df.loc[start_index:end_index,'poly_fit_min'], fill=None, mode='lines', line=dict(color='blue'), name='Lower Bound'))
-    fig.add_trace(go.Scatter(x=df.loc[start_index:end_index].index, y=df.loc[start_index:end_index,'poly_fit_max'], fill='tonexty', mode='lines', line=dict(color='blue'), name='Upper Bound'))
+    fig.add_trace(go.Scatter(x=df.loc[start_index:end_index].index, y=df.loc[start_index:end_index,'poly_fit_min'], fill=None, mode='lines', line=dict(color='blue'), showlegend=False))
+    fig.add_trace(go.Scatter(x=df.loc[start_index:end_index].index, y=df.loc[start_index:end_index,'poly_fit_max'], fill='tonexty', mode='lines', line=dict(color='blue'), showlegend=False))
 
     # Update layout if needed
     fig.update_layout(
@@ -200,21 +225,27 @@ def get_plotly_fig(df, config_dict):
     fig.add_trace(go.Scatter(x=loc_min.index, y=loc_min['Temp_smooth'], mode='markers', name='Local Minima',
                              marker=dict(color='green', symbol='circle')))
 
+    if config_dict['resample_string'][-1] == 'T':
+        min_temp = df['Temp_smooth'].min()
+        resolution_min = int(config_dict['resample_string'][:-1])
+        bin_width = pd.Timedelta(minutes=resolution_min)/2
+    else:
+        print('get_plotly_fig: Code need update to get the correct bin_width (Resample String is something different than minutes "T")')
 
+    if config_dict['ambient_h2o_dropdown'] == 'amb_gt_h2o':  # looking at dropping temperatures for pump ON state
+        y_pred = df['Temp_extrema'] == -1
+        y_pred_on = y_pred.loc[y_pred]
+    else:                                    # amb_lt_h2o    # looking at increasing temperatures for pump ON state
+        y_pred = df['Temp_extrema'] == 1
+        y_pred_on = y_pred.loc[y_pred]
 
-    # pump is on when the Temp_extrema is between a maxima and a minima
-    resolution_min = int(config_dict['resample_string'][:-1])
-    bin_width = pd.Timedelta(minutes=resolution_min)/2
-    min_temp = df['Temp_smooth'].min()
-
-    y_pred = df['Temp_extrema']==-1
-    y_pred_on = y_pred.loc[y_pred]
     if len(y_pred_on) > 0:
-        for start,stop in get_start_stops(y_pred_on):
+        for pump_usage_id, (start,stop) in enumerate(get_start_stops(y_pred_on)):
             bin_start = start - bin_width / 2
             bin_end = stop + bin_width / 2
             fig.add_shape(type="rect", x0=bin_start, y0=min_temp-0.5, x1=bin_end, y1=min_temp,
                           line=dict(color='blue', width=1), fillcolor='blue', opacity=0.8)
+            result_extrema.update({pump_usage_id: df.loc[start:stop,'Temp_smooth']})
 
     min_temp -=0.6
     if 'resid' in df.columns:
@@ -268,7 +299,7 @@ def get_plotly_fig(df, config_dict):
         yaxis=dict(showgrid=True, gridwidth=1, gridcolor='LightGrey'),  # Customize y-axis grid
     )
 
-    return fig
+    return fig, result_extrema
 
 def get_poly_fit(x,y,degree):
 
@@ -279,16 +310,38 @@ def get_poly_fit(x,y,degree):
     return polynomial
 
 def get_start_stops(y):
+    # Assuming 'y.index' contains timestamps in ascending order
+    start_stop_pairs = []
+    current_group = [y.index[0]]  # Initialize the first timestamp as the start of the group
 
-    groups = []
-    for k, g in groupby(enumerate(y.index), lambda ix: ix[0] - ix[1].minute):
-        timestamps = [ix[1] for ix in g]
-        if len(timestamps) == 1:
-            groups.append((timestamps[0], timestamps[0]))
+    for i in range(1, len(y.index)):
+        time_diff = y.index[i] - y.index[i - 1]
+
+        # Check if the difference between consecutive timestamps is 1 minute
+        if time_diff == timedelta(minutes=1):
+            current_group.append(y.index[i])  # Add to the current group
         else:
-            groups.append((timestamps[0], timestamps[-1]))
+            # If there's a jump, append the current group as a start-stop pair
+            start_stop_pairs.append((current_group[0], current_group[-1]))
+            current_group = [y.index[i]]  # Start a new group
 
-    return groups
+    # Append the last group if it's not already added
+    if current_group:
+        start_stop_pairs.append((current_group[0], current_group[-1]))
+
+
+    return start_stop_pairs
+#def get_start_stops(y):
+#
+#    groups = []
+#    for k, g in groupby(enumerate(y.index), lambda ix: ix[0] - ix[1].minute):
+#        timestamps = [ix[1] for ix in g]
+#        if len(timestamps) == 1:
+#            groups.append((timestamps[0], timestamps[0]))
+#        else:
+#            groups.append((timestamps[0], timestamps[-1]))
+#
+#    return groups
 
 
 def import_xlsx_to_df(filename,

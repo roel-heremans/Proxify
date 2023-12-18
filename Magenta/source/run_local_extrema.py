@@ -9,8 +9,6 @@ from utils.dash_utils import get_alternating_values, getting_extrema, get_data, 
 
 def fourier_series(x, *a):
     n = len(a) //2 # Extracting the number of harmonics from the length of a
-    print("Length of a:", len(a))
-    print("Value of n:", n)
     w = 2 * np.pi / 24  # Frequency of the cycle, assuming a 24-hour cycle
 
     ret = a[0]  # Initial value (mean temperature)
@@ -95,10 +93,12 @@ if __name__ == "__main__":
     config_dict = {'file_dropdown': 'Bangladesh_2023-12-12.xlsx',
                    'smooth_factor': 15,
                    'resample_string': '1T',
+                   'poly_fit_deg': 20,
                    'ma_size': 60,
                    'dist_for_maxima': 3,
                    'dist_for_minima': 3,
                    'peak_prominence': 0.1,
+                   'ambient_h2o_dropdown': 'amb_gt_h2o',
                    'res_thres_minus': -0.5,
                    'res_thres_plus': 0.5,
                    'timestamp_col_name':'DateTime_EAT',
@@ -113,6 +113,7 @@ if __name__ == "__main__":
     #selected_file = 'Kaliro Use Data (Kakosi Budumba) Batch05.xlsx'
     df = get_data(os.path.join(data_directory, selected_file), config_dict)
     fig = make_trend_plot(df)
-    fig = get_plotly_fig(df, config_dict)
+    fig, result_dict_extrema = get_plotly_fig(df, config_dict)
+    a = 1
 
 
