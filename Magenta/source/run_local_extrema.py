@@ -5,7 +5,7 @@ from scipy.optimize import curve_fit
 from statsmodels.tsa.seasonal import seasonal_decompose
 import matplotlib.pyplot as plt
 from utils.dash_utils import get_alternating_values, getting_extrema, get_data, get_plotly_fig, get_start_stops, \
-    import_xlsx_to_df, resample_df
+    import_xlsx_to_df, resample_df, get_prediction_result_extrema, get_prediction_result_seasonal, extract_gui_output
 
 # Suppress the RankWarning
 warnings.filterwarnings('ignore', category=np.RankWarning)
@@ -71,7 +71,7 @@ if __name__ == "__main__":
     #                   'Consolidated UG Data Jan 2023 Batch04.xlsx',
     #                   'Kaliro Use Data (Kakosi Budumba) Batch05.xlsx'
 
-    config_dict = {'file_dropdown': 'Consolidated UG Data Jan 2023 Batch01.xlsx',
+    config_dict = {'file_dropdown': 'Consolidated UG Data Jan 2023 Batch03b.xlsx',
                    'smooth_factor': 5,
                    'resample_string': '1T',
                    'poly_fit_deg': 6,
@@ -92,6 +92,13 @@ if __name__ == "__main__":
 
     df = get_data(os.path.join(data_directory, selected_file), config_dict)
     fig = make_trend_plot(df)
+
+    res_dict_extrema = get_prediction_result_extrema(df, config_dict)
+    gui_output_extrema = extract_gui_output(res_dict_extrema)
+
+    res_dict_seasonal = get_prediction_result_seasonal(df, config_dict)
+    gui_output_seasonal = extract_gui_output(res_dict_seasonal)
+
     fig, result_dict_extrema = get_plotly_fig(df, config_dict)
     a = 1
 
