@@ -35,6 +35,33 @@ def correct_pump_on_window(time_series, ambient_h2o_dropdown, window_size):
 
     return break_point_idx
 
+def extract_gui_output(res_dict):
+
+    gui_output ={}
+
+    durations = []
+    longest = None
+    shortest = None
+
+    for pump_on_id, value in res_dict.items():
+        delta_time = pd.to_datetime(value.index[-1]) - pd.to_datetime(value.index[0])
+
+        # Initialize shortest and longest with first delta_time
+        if longest is None or delta_time > longest:
+            longest = delta_time
+        if shortest is None or delta_time < shortest:
+            shortest = delta_time
+
+        durations.append((value.index[-1] - value.index[0]).seconds // 60)  # Convert seconds to minutes
+
+    gui_output = {'Nr of pump usage': len(durations),
+                  'Total duration': sum(durations),
+                  'Shortest (min)': int(shortest.total_seconds() // 60),
+                  'Longest (min)': int(longest.total_seconds() // 60)
+                  }
+    print(gui_output)
+    return gui_output
+
 def get_alternating_values(maxima_indices, minima_indices):
     '''
     This function serves to get alternating values between maxima_indices and minima_indices. For instance:
@@ -99,69 +126,60 @@ def get_alternating_values(maxima_indices, minima_indices):
 
     return merged_indices_res, max_is_first
 
-def getting_extrema(temperatures, config_dict):
-
-    # selection of the start and stop times for which the extrema need to be considered
-    start_time = pd.to_datetime(config_dict['detect_start_time']).time()
-    stop_time = pd.to_datetime(config_dict['detect_stop_time']).time()
-
-    # Create a mask for values outside the time interval
-    mask = (temperatures.index.time < start_time) | (temperatures.index.time > stop_time)
-
-    # Set 'Temp_extrema' values to zero where the index falls outside the interval
-    temperatures.loc[mask] = temperatures.min()
-    df = temperatures.to_frame().copy()
-
-    maxima_indices, _ = find_peaks(temperatures,
-                                   distance=config_dict['dist_for_maxima'], prominence=config_dict['peak_prominence'])
-    minima_indices, _ = find_peaks(-temperatures,
-                                   distance=config_dict['dist_for_minima'], prominence=config_dict['peak_prominence'])
-
-    if (len(maxima_indices) > 0) & (len(minima_indices) > 0):
-        alternating_max_min, max_is_first = get_alternating_values(maxima_indices, minima_indices)
-        alternating_temperatures = temperatures[alternating_max_min]
+def get_bin_width(df, config_dict):
+    min_temp = df['Temp_smooth'].min()
+    if config_dict['resample_string'][-1] == 'T':
+        resolution_min = int(config_dict['resample_string'][:-1])
+        bin_width = pd.Timedelta(minutes=resolution_min)
     else:
-        alternating_temperatures = []
+        print('get_plotly_fig: Code need update to get the correct bin_width (Resample String is something different than minutes "T")')
+    return min_temp, bin_width
 
-    if len(alternating_temperatures) >= 2:
-        # find out if the first element in the alternating_temperatures is a min or a max by comparing its value with the
-        # next one.
-        first_is_maximum = False
-        if alternating_temperatures[0] > alternating_temperatures[1]:
-            first_is_maximum = True
+def get_prediction_result_extrema(df, config_dict):
+    result_extrema = {}
 
+    _, bin_width = get_bin_width(df, config_dict)
 
-        if first_is_maximum:
-            df['Temp_extrema'] = 1
-            for val1,val2 in zip(alternating_temperatures.index[0::2], alternating_temperatures.index[1::2]):
-                df.loc[val1:val2, 'Temp_extrema'] = -1
-            df.loc[alternating_temperatures.index[0::2], 'Temp_extrema'] = 2
-            df.loc[alternating_temperatures.index[1::2], 'Temp_extrema'] = -2
-        else:
-            df['Temp_extrema'] = -1
-            for val1,val2 in zip(alternating_temperatures.index[0::2], alternating_temperatures.index[1::2]):
-                df.loc[val1:val2, 'Temp_extrema'] = 1
-            df.loc[alternating_temperatures.index[0::2], 'Temp_extrema'] = -2
-            df.loc[alternating_temperatures.index[1::2], 'Temp_extrema'] = 2
+    if config_dict['ambient_h2o_dropdown'] == 'amb_gt_h2o':  # looking at dropping temperatures for pump ON state
+        y_pred = df['Temp_extrema'] == -1
+        y_pred_on = y_pred.loc[y_pred]
+    else:                                    # amb_lt_h2o    # looking at increasing temperatures for pump ON state
+        y_pred = df['Temp_extrema'] == 1
+        y_pred_on = y_pred.loc[y_pred]
+
+    if len(y_pred_on) > 0:
+        for pump_usage_id, (start,stop) in enumerate(get_start_stops(y_pred_on)):
+            bin_start = start - bin_width
+            bin_end = stop + bin_width
+            new_idx = correct_pump_on_window(df.loc[bin_start:bin_end, 'Temp_smooth'].values, config_dict['ambient_h2o_dropdown'], 5)
+            if new_idx.any():
+                bin_start += new_idx[0] * bin_width
+            result_extrema.update({pump_usage_id: df.loc[bin_start:bin_end,'Temp_smooth']})
+
+    return result_extrema
+
+def get_prediction_result_seasonal(df, config_dict):
+    result_seasonal = {}
+    _, bin_width = get_bin_width(df, config_dict)
+    if config_dict['ambient_h2o_dropdown'] == 'amb_gt_h2o':
+        if 'resid' in df:
+            y = df['resid'].dropna()
+            y = y[y < config_dict['res_thres_minus']]
+            if len(y)> 0:
+                for pump_usage_id, (start,stop) in enumerate(get_start_stops(y)):
+                    bin_start = start - bin_width / 2
+                    bin_end = stop + bin_width / 2
+                    result_seasonal.update({pump_usage_id: df.loc[bin_start:bin_end,'Temp_smooth']})
     else:
-        df['Temp_extrema'] = 1
-
-    df.loc[mask,'Temp_extrema'] = 0
-
-    # Find the index of the first occurrence of value 2 in 'Temp_extrema' column
-    index_first_value_positive_2 = df.index[df['Temp_extrema'] == 2].min()
-    index_last_value_negative_2 = df.index[df['Temp_extrema'] == -2].max()
-
-
-    if index_first_value_positive_2 is not pd.NaT:
-        # Set values before the first occurrence of 2 to 0
-        df.loc[df.index < index_first_value_positive_2, 'Temp_extrema'] = 0
-
-    if index_last_value_negative_2 is not pd.NaT:
-        # Set values before the first occurrence of 2 to 0
-        df.loc[df.index > index_last_value_negative_2, 'Temp_extrema'] = 0
-
-    return df['Temp_extrema']
+        if 'resid' in df.columns:
+            y = df['resid'].dropna()
+            y = y[y > config_dict['res_thres_plus']]
+            if len(y) > 0:
+                for pump_usage_id, (start, stop) in enumerate(get_start_stops(y)):
+                    bin_start = start - bin_width / 2
+                    bin_end = stop + bin_width / 2
+                    result_seasonal.update({pump_usage_id: df.loc[bin_start:bin_end,'Temp_smooth']})
+    return result_seasonal
 
 def get_data(filename, config_dict):
 
@@ -233,14 +251,13 @@ def get_data(filename, config_dict):
 
 def get_plotly_fig(df, config_dict):
 
-    result_extrema = {}
-    result_seasonal = {}
     # Create the base line plot
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=df.index, y=df['Temperature'], mode='lines', name='Temp Unaltered'))
     fig.add_trace(go.Scatter(x=df.index, y=df['poly_fit'], mode='lines',
                              name='Temp Ambient Proxy (poly-{})'.format(config_dict['poly_fit_deg'])))
     
+    # The blue band around the poly_fit
     if ('poly_fit_min' in df) & ('poly_fit_min' in df):
         start_index = df[df['Temp_extrema']!=0].index[0]
         end_index = df[df['Temp_extrema']!=0].index[-1]
@@ -258,8 +275,10 @@ def get_plotly_fig(df, config_dict):
             xaxis=dict(title='X-axis Label'),
             yaxis=dict(title='Y-axis Label')
         )
+    # Adding Temp_smooth on which the min and max are calculated
     fig.add_trace(go.Scatter(x=df.index, y=df['Temp_smooth'], mode='lines',
                              name='Temp Smoothed ({})'.format(config_dict['smooth_factor'])))
+    # Adding the min and max
     loc_max = df[df["Temp_extrema"] == 2].copy()
     fig.add_trace(go.Scatter(x=loc_max.index, y=loc_max['Temp_smooth'], mode='markers', name='Local Maxima',
                              marker=dict(color='red', symbol='circle')))
@@ -267,53 +286,22 @@ def get_plotly_fig(df, config_dict):
     fig.add_trace(go.Scatter(x=loc_min.index, y=loc_min['Temp_smooth'], mode='markers', name='Local Minima',
                              marker=dict(color='green', symbol='circle')))
 
-    if config_dict['resample_string'][-1] == 'T':
-        min_temp = df['Temp_smooth'].min()
-        resolution_min = int(config_dict['resample_string'][:-1])
-        bin_width = pd.Timedelta(minutes=resolution_min)
-    else:
-        print('get_plotly_fig: Code need update to get the correct bin_width (Resample String is something different than minutes "T")')
-
-    if config_dict['ambient_h2o_dropdown'] == 'amb_gt_h2o':  # looking at dropping temperatures for pump ON state
-        y_pred = df['Temp_extrema'] == -1
-        y_pred_on = y_pred.loc[y_pred]
-    else:                                    # amb_lt_h2o    # looking at increasing temperatures for pump ON state
-        y_pred = df['Temp_extrema'] == 1
-        y_pred_on = y_pred.loc[y_pred]
-
-    if len(y_pred_on) > 0:
-        for pump_usage_id, (start,stop) in enumerate(get_start_stops(y_pred_on)):
-            bin_start = start - bin_width
-            bin_end = stop + bin_width
-            new_idx = correct_pump_on_window(df.loc[bin_start:bin_end, 'Temp_smooth'].values, config_dict['ambient_h2o_dropdown'], 5)
-            if new_idx.any():
-                bin_start += new_idx[0] * bin_width
-            fig.add_shape(type="rect", x0=bin_start, y0=min_temp-0.5, x1=bin_end, y1=min_temp,
-                          line=dict(color='blue', width=1), fillcolor='blue', opacity=0.8)
-            result_extrema.update({pump_usage_id: df.loc[bin_start:bin_end,'Temp_smooth']})
+    min_temp, bin_width = get_bin_width(df, config_dict)
+    res_extrema_dict = get_prediction_result_extrema(df, config_dict)
+    for key, value in res_extrema_dict.items():
+        fig.add_shape(type="rect", x0=value.index[0], y0=min_temp-0.5, x1=value.index[-1], y1=min_temp,
+                  line=dict(color='blue', width=1), fillcolor='blue', opacity=0.8)
 
     min_temp -=0.6
-    if config_dict['ambient_h2o_dropdown'] == 'amb_gt_h2o':
-        if 'resid' in df.columns:
-            y = df['resid'].dropna()
-            y = y[y < config_dict['res_thres_minus']]
-            if len(y)> 0:
-                for start,stop in get_start_stops(y):
-                    bin_start = start - bin_width / 2
-                    bin_end = stop + bin_width / 2
-                    fig.add_shape(type="rect", x0=bin_start, y0=min_temp-0.5, x1=bin_end, y1=min_temp,
-                                  line=dict(color='orange', width=1), fillcolor='orange', opacity=0.8)
+    res_seasonal_dict = get_prediction_result_seasonal(df, config_dict)
+    for key, value in res_seasonal_dict.items():
+        if config_dict['ambient_h2o_dropdown'] == 'amb_gt_h2o':
+            fig.add_shape(type="rect", x0=value.index[0], y0=min_temp-0.5, x1=value.index[-1], y1=min_temp,
+                          line=dict(color='orange', width=1), fillcolor='orange', opacity=0.8)
 
-    else:
-        if 'resid' in df.columns:
-            y = df['resid'].dropna()
-            y = y[y > config_dict['res_thres_plus']]
-            if len(y) > 0:
-                for start, stop in get_start_stops(y):
-                    bin_start = start - bin_width / 2
-                    bin_end = stop + bin_width / 2
-                    fig.add_shape(type="rect", x0=bin_start, y0=min_temp - 0.5, x1=bin_end, y1=min_temp,
-                                  line=dict(color='green', width=1), fillcolor='green', opacity=0.8)
+        else:
+            fig.add_shape(type="rect", x0=value.index[0], y0=min_temp - 0.5, x1=value.index[-1], y1=min_temp,
+                          line=dict(color='green', width=1), fillcolor='green', opacity=0.8)
 
     min_temp -=0.6
     if 'GroundTruth' in df.columns:
@@ -345,7 +333,6 @@ def get_plotly_fig(df, config_dict):
                                  marker=dict(color='green', opacity=0.8, symbol='square', size=10),
                                  name='Pred Season-Res + (H2O > Amb)'))
 
-
     # Set title for the figure
     fig.update_layout(title=config_dict['file_dropdown'])
 
@@ -355,7 +342,7 @@ def get_plotly_fig(df, config_dict):
         yaxis=dict(showgrid=True, gridwidth=1, gridcolor='LightGrey'),  # Customize y-axis grid
     )
 
-    return fig, result_extrema
+    return fig
 
 def get_poly_fit(x,y,degree):
 
@@ -387,6 +374,70 @@ def get_start_stops(y):
 
 
     return start_stop_pairs
+
+def getting_extrema(temperatures, config_dict):
+
+    # selection of the start and stop times for which the extrema need to be considered
+    start_time = pd.to_datetime(config_dict['detect_start_time']).time()
+    stop_time = pd.to_datetime(config_dict['detect_stop_time']).time()
+
+    # Create a mask for values outside the time interval
+    mask = (temperatures.index.time < start_time) | (temperatures.index.time > stop_time)
+
+    # Set 'Temp_extrema' values to zero where the index falls outside the interval
+    temperatures.loc[mask] = temperatures.min()
+    df = temperatures.to_frame().copy()
+
+    maxima_indices, _ = find_peaks(temperatures,
+                                   distance=config_dict['dist_for_maxima'], prominence=config_dict['peak_prominence'])
+    minima_indices, _ = find_peaks(-temperatures,
+                                   distance=config_dict['dist_for_minima'], prominence=config_dict['peak_prominence'])
+
+    if (len(maxima_indices) > 0) & (len(minima_indices) > 0):
+        alternating_max_min, max_is_first = get_alternating_values(maxima_indices, minima_indices)
+        alternating_temperatures = temperatures[alternating_max_min]
+    else:
+        alternating_temperatures = []
+
+    if len(alternating_temperatures) >= 2:
+        # find out if the first element in the alternating_temperatures is a min or a max by comparing its value with the
+        # next one.
+        first_is_maximum = False
+        if alternating_temperatures[0] > alternating_temperatures[1]:
+            first_is_maximum = True
+
+
+        if first_is_maximum:
+            df['Temp_extrema'] = 1
+            for val1,val2 in zip(alternating_temperatures.index[0::2], alternating_temperatures.index[1::2]):
+                df.loc[val1:val2, 'Temp_extrema'] = -1
+            df.loc[alternating_temperatures.index[0::2], 'Temp_extrema'] = 2
+            df.loc[alternating_temperatures.index[1::2], 'Temp_extrema'] = -2
+        else:
+            df['Temp_extrema'] = -1
+            for val1,val2 in zip(alternating_temperatures.index[0::2], alternating_temperatures.index[1::2]):
+                df.loc[val1:val2, 'Temp_extrema'] = 1
+            df.loc[alternating_temperatures.index[0::2], 'Temp_extrema'] = -2
+            df.loc[alternating_temperatures.index[1::2], 'Temp_extrema'] = 2
+    else:
+        df['Temp_extrema'] = 1
+
+    df.loc[mask,'Temp_extrema'] = 0
+
+    # Find the index of the first occurrence of value 2 in 'Temp_extrema' column
+    index_first_value_positive_2 = df.index[df['Temp_extrema'] == 2].min()
+    index_last_value_negative_2 = df.index[df['Temp_extrema'] == -2].max()
+
+
+    if index_first_value_positive_2 is not pd.NaT:
+        # Set values before the first occurrence of 2 to 0
+        df.loc[df.index < index_first_value_positive_2, 'Temp_extrema'] = 0
+
+    if index_last_value_negative_2 is not pd.NaT:
+        # Set values before the first occurrence of 2 to 0
+        df.loc[df.index > index_last_value_negative_2, 'Temp_extrema'] = 0
+
+    return df['Temp_extrema']
 
 def import_xlsx_to_df(filename,
                       timestamp_col_name='DateTime_EAT',
