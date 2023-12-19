@@ -6,6 +6,35 @@ import plotly.graph_objects as go
 from statsmodels.tsa.seasonal import seasonal_decompose
 from datetime import timedelta
 
+def correct_pump_on_window(time_series, ambient_h2o_dropdown, window_size):
+
+    slopes_before = [np.nan] * window_size
+    slopes_after = [np.nan] * window_size
+
+    for i in range(window_size, len(time_series)-window_size):
+        slopes_before.append(time_series[i] - time_series[i-window_size])
+        slopes_after.append(time_series[i+window_size]-time_series[i])
+    diff = np.array(slopes_after) - np.array(slopes_before)
+
+
+    if ambient_h2o_dropdown == 'amb_gt_h2o':    # during the time that the ambient temperature is cooling down:
+                                                # for this case we want to check if there is a breakpoint where the
+                                                # slope before is bigger (less negative) then the slope after
+                                                # (more negative) the breakpoint (so looking for minima)
+        break_points = find_peaks(-diff, prominence=0.5)
+    else:   # during the time that the ambient temperature is rising:
+            # then the slope after the breakpoint (so looking for maxima)
+            # for this case we want to check if there is a breakpoint where the slope before is smaller
+        break_points = find_peaks(diff, prominence=0.5)
+
+
+    if len(break_points):
+        break_point_idx = break_points[0]
+    else:
+        break_point_idx = 0
+
+    return break_point_idx
+
 def get_alternating_values(maxima_indices, minima_indices):
     '''
     This function serves to get alternating values between maxima_indices and minima_indices. For instance:
@@ -88,9 +117,11 @@ def getting_extrema(temperatures, config_dict):
     minima_indices, _ = find_peaks(-temperatures,
                                    distance=config_dict['dist_for_minima'], prominence=config_dict['peak_prominence'])
 
-    alternating_max_min, max_is_first = get_alternating_values(maxima_indices, minima_indices)
-
-    alternating_temperatures = temperatures[alternating_max_min]
+    if (len(maxima_indices) > 0) & (len(minima_indices) > 0):
+        alternating_max_min, max_is_first = get_alternating_values(maxima_indices, minima_indices)
+        alternating_temperatures = temperatures[alternating_max_min]
+    else:
+        alternating_temperatures = []
 
     if len(alternating_temperatures) >= 2:
         # find out if the first element in the alternating_temperatures is a min or a max by comparing its value with the
@@ -173,24 +204,28 @@ def get_data(filename, config_dict):
     df = pd.concat([df, df_extrema], axis=1)
 
     temperature_series = df['Temperature']
-    results = seasonal_decompose(temperature_series, model='additive', period=24)  # Assuming a daily seasonality
-    df = pd.concat([df, results.trend, results.seasonal, results.resid], axis=1)
+    season_period = 24                 # Assuming a daily seasonality
+    if len(temperature_series) >= 2 * season_period:
+        results = seasonal_decompose(temperature_series, model='additive', period=season_period)  # Assuming a daily seasonality
+        df = pd.concat([df, results.trend, results.seasonal, results.resid], axis=1)
 
 
     df.reset_index(inplace=True)
     x = df[df['Temp_extrema']==2].index
     y = df[df['Temp_extrema']==2]['Temp_smooth'].values
-    convex_envelope_max = np.interp(np.arange(df.shape[0]), x, y)
-    df['convex_envelope_max'] = convex_envelope_max
-    polynome = get_poly_fit(np.arange(len(df)),df['convex_envelope_max'].values,config_dict['poly_fit_deg'])
-    df['poly_fit_max'] = polynome(np.arange(len(df)))
+    if (len(x) > 0) & (len(y) > 0):
+        convex_envelope_max = np.interp(np.arange(df.shape[0]), x, y)
+        df['convex_envelope_max'] = convex_envelope_max
+        polynome = get_poly_fit(np.arange(len(df)),df['convex_envelope_max'].values,config_dict['poly_fit_deg'])
+        df['poly_fit_max'] = polynome(np.arange(len(df)))
 
     x = df[df['Temp_extrema']==-2].index
     y = df[df['Temp_extrema']==-2]['Temp_smooth'].values
-    convex_envelope_min = np.interp(np.arange(df.shape[0]), x, y)
-    df['convex_envelope_min'] = convex_envelope_min
-    polynome = get_poly_fit(np.arange(len(df)),df['convex_envelope_min'].values,config_dict['poly_fit_deg'])
-    df['poly_fit_min'] = polynome(np.arange(len(df)))
+    if (len(x) > 0) & (len(y) > 0):
+        convex_envelope_min = np.interp(np.arange(df.shape[0]), x, y)
+        df['convex_envelope_min'] = convex_envelope_min
+        polynome = get_poly_fit(np.arange(len(df)),df['convex_envelope_min'].values,config_dict['poly_fit_deg'])
+        df['poly_fit_min'] = polynome(np.arange(len(df)))
 
     df.set_index('Timestamp', inplace=True)
 
@@ -205,17 +240,24 @@ def get_plotly_fig(df, config_dict):
     fig.add_trace(go.Scatter(x=df.index, y=df['Temperature'], mode='lines', name='Temp Unaltered'))
     fig.add_trace(go.Scatter(x=df.index, y=df['poly_fit'], mode='lines',
                              name='Temp Ambient Proxy (poly-{})'.format(config_dict['poly_fit_deg'])))
-    start_index = df[df['Temp_extrema']!=0].index[0]
-    end_index = df[df['Temp_extrema']!=0].index[-1]
-    fig.add_trace(go.Scatter(x=df.loc[start_index:end_index].index, y=df.loc[start_index:end_index,'poly_fit_min'], fill=None, mode='lines', line=dict(color='blue'), showlegend=False))
-    fig.add_trace(go.Scatter(x=df.loc[start_index:end_index].index, y=df.loc[start_index:end_index,'poly_fit_max'], fill='tonexty', mode='lines', line=dict(color='blue'), showlegend=False))
-
-    # Update layout if needed
-    fig.update_layout(
-        title='Filled Area Between Bounds',
-        xaxis=dict(title='X-axis Label'),
-        yaxis=dict(title='Y-axis Label')
-    )
+    
+    if ('poly_fit_min' in df) & ('poly_fit_min' in df):
+        start_index = df[df['Temp_extrema']!=0].index[0]
+        end_index = df[df['Temp_extrema']!=0].index[-1]
+        fig.add_trace(go.Scatter(x=df.loc[start_index:end_index].index,
+                                 y=df.loc[start_index:end_index,'poly_fit_min'],
+                                 fill=None, mode='lines', line=dict(color='blue'),
+                                 showlegend=False))
+        fig.add_trace(go.Scatter(x=df.loc[start_index:end_index].index,
+                                 y=df.loc[start_index:end_index,'poly_fit_max'],
+                                 fill='tonexty', mode='lines', line=dict(color='blue'),
+                                 showlegend=False))
+        # Update layout if needed
+        fig.update_layout(
+            title='Filled Area Between Bounds',
+            xaxis=dict(title='X-axis Label'),
+            yaxis=dict(title='Y-axis Label')
+        )
     fig.add_trace(go.Scatter(x=df.index, y=df['Temp_smooth'], mode='lines',
                              name='Temp Smoothed ({})'.format(config_dict['smooth_factor'])))
     loc_max = df[df["Temp_extrema"] == 2].copy()
@@ -228,7 +270,7 @@ def get_plotly_fig(df, config_dict):
     if config_dict['resample_string'][-1] == 'T':
         min_temp = df['Temp_smooth'].min()
         resolution_min = int(config_dict['resample_string'][:-1])
-        bin_width = pd.Timedelta(minutes=resolution_min)/2
+        bin_width = pd.Timedelta(minutes=resolution_min)
     else:
         print('get_plotly_fig: Code need update to get the correct bin_width (Resample String is something different than minutes "T")')
 
@@ -241,22 +283,37 @@ def get_plotly_fig(df, config_dict):
 
     if len(y_pred_on) > 0:
         for pump_usage_id, (start,stop) in enumerate(get_start_stops(y_pred_on)):
-            bin_start = start - bin_width / 2
-            bin_end = stop + bin_width / 2
+            bin_start = start - bin_width
+            bin_end = stop + bin_width
+            new_idx = correct_pump_on_window(df.loc[bin_start:bin_end, 'Temp_smooth'].values, config_dict['ambient_h2o_dropdown'], 5)
+            if new_idx.any():
+                bin_start += new_idx[0] * bin_width
             fig.add_shape(type="rect", x0=bin_start, y0=min_temp-0.5, x1=bin_end, y1=min_temp,
                           line=dict(color='blue', width=1), fillcolor='blue', opacity=0.8)
-            result_extrema.update({pump_usage_id: df.loc[start:stop,'Temp_smooth']})
+            result_extrema.update({pump_usage_id: df.loc[bin_start:bin_end,'Temp_smooth']})
 
     min_temp -=0.6
-    if 'resid' in df.columns:
-        y = df['resid'].dropna()
-        y = y[y < config_dict['res_thres_minus']]
-        if len(y)> 0:
-            for start,stop in get_start_stops(y):
-                bin_start = start - bin_width / 2
-                bin_end = stop + bin_width / 2
-                fig.add_shape(type="rect", x0=bin_start, y0=min_temp-0.5, x1=bin_end, y1=min_temp,
-                              line=dict(color='orange', width=1), fillcolor='orange', opacity=0.8)
+    if config_dict['ambient_h2o_dropdown'] == 'amb_gt_h2o':
+        if 'resid' in df.columns:
+            y = df['resid'].dropna()
+            y = y[y < config_dict['res_thres_minus']]
+            if len(y)> 0:
+                for start,stop in get_start_stops(y):
+                    bin_start = start - bin_width / 2
+                    bin_end = stop + bin_width / 2
+                    fig.add_shape(type="rect", x0=bin_start, y0=min_temp-0.5, x1=bin_end, y1=min_temp,
+                                  line=dict(color='orange', width=1), fillcolor='orange', opacity=0.8)
+
+    else:
+        if 'resid' in df.columns:
+            y = df['resid'].dropna()
+            y = y[y > config_dict['res_thres_plus']]
+            if len(y) > 0:
+                for start, stop in get_start_stops(y):
+                    bin_start = start - bin_width / 2
+                    bin_end = stop + bin_width / 2
+                    fig.add_shape(type="rect", x0=bin_start, y0=min_temp - 0.5, x1=bin_end, y1=min_temp,
+                                  line=dict(color='green', width=1), fillcolor='green', opacity=0.8)
 
     min_temp -=0.6
     if 'GroundTruth' in df.columns:
@@ -268,26 +325,25 @@ def get_plotly_fig(df, config_dict):
                 fig.add_shape(type="rect", x0=bin_start, y0=min_temp-0.5, x1=bin_end, y1=min_temp,
                               line=dict(color='red', width=1), fillcolor='red', opacity=0.8)
 
-    min_temp -=0.6
-    if 'resid' in df.columns:
-        y = df['resid'].dropna()
-        y = y[y > config_dict['res_thres_plus']]
-        if len(y)> 0:
-            for start,stop in get_start_stops(y):
-                bin_start = start - bin_width / 2
-                bin_end = stop + bin_width / 2
-                fig.add_shape(type="rect", x0=bin_start, y0=min_temp-0.5, x1=bin_end, y1=min_temp,
-                              line=dict(color='green', width=1), fillcolor='green', opacity=0.8)
+
 
     # Add invisible traces for legend
     fig.add_trace(go.Scatter(x=[None], y=[None], mode='markers',
-                             marker=dict(color='red', opacity=0.8,  symbol='square', size=10), name='Ground Truth'))
+                             marker=dict(color='red', opacity=0.8,  symbol='square', size=10),
+                             name='Ground Truth'))
+
     fig.add_trace(go.Scatter(x=[None], y=[None], mode='markers',
-                             marker=dict(color='blue', opacity=0.8, symbol='square', size=10), name='Pred Local-Extr (H2O < Amb)'))
-    fig.add_trace(go.Scatter(x=[None], y=[None], mode='markers',
-                             marker=dict(color='orange', opacity=0.8, symbol='square', size=10), name='Pred Season-Res - (H2O < Amb)'))
-    fig.add_trace(go.Scatter(x=[None], y=[None], mode='markers',
-                             marker=dict(color='green', opacity=0.8, symbol='square', size=10), name='Pred Season-Res + (H2O > Amb)'))
+                             marker=dict(color='blue', opacity=0.8, symbol='square', size=10),
+                             name='Pred Local-Extr'))
+
+    if config_dict['ambient_h2o_dropdown'] == 'amb_gt_h2o':
+        fig.add_trace(go.Scatter(x=[None], y=[None], mode='markers',
+                                 marker=dict(color='orange', opacity=0.8, symbol='square', size=10),
+                                 name='Pred Season-Res - (H2O < Amb)'))
+    else:
+        fig.add_trace(go.Scatter(x=[None], y=[None], mode='markers',
+                                 marker=dict(color='green', opacity=0.8, symbol='square', size=10),
+                                 name='Pred Season-Res + (H2O > Amb)'))
 
 
     # Set title for the figure
@@ -331,18 +387,6 @@ def get_start_stops(y):
 
 
     return start_stop_pairs
-#def get_start_stops(y):
-#
-#    groups = []
-#    for k, g in groupby(enumerate(y.index), lambda ix: ix[0] - ix[1].minute):
-#        timestamps = [ix[1] for ix in g]
-#        if len(timestamps) == 1:
-#            groups.append((timestamps[0], timestamps[0]))
-#        else:
-#            groups.append((timestamps[0], timestamps[-1]))
-#
-#    return groups
-
 
 def import_xlsx_to_df(filename,
                       timestamp_col_name='DateTime_EAT',
