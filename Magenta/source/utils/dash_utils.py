@@ -1,3 +1,4 @@
+import os
 import pandas as pd
 import numpy as np
 from itertools import groupby
@@ -54,12 +55,13 @@ def extract_gui_output(res_dict):
 
         durations.append((value.index[-1] - value.index[0]).seconds // 60)  # Convert seconds to minutes
 
-    gui_output = {'Nr of pump usage': len(durations),
-                  'Total duration': sum(durations),
-                  'Shortest (min)': int(shortest.total_seconds() // 60),
-                  'Longest (min)': int(longest.total_seconds() // 60)
-                  }
-    print(gui_output)
+    if durations:
+        gui_output = {'Nr of pump usage': len(durations),
+                      'Total duration (min)': sum(durations),
+                      'Shortest (min)': int(shortest.total_seconds() // 60),
+                      'Longest (min)': int(longest.total_seconds() // 60)
+                      }
+
     return gui_output
 
 def get_alternating_values(maxima_indices, minima_indices):
@@ -201,7 +203,6 @@ def get_data(filename, config_dict):
     df['Temperature'].fillna(method='bfill', inplace=True)
     df['Temperature'].fillna(method='ffill', inplace=True)
 
-    print('Polynomial fit (degree = {})'.format(type(config_dict['poly_fit_deg'])))
     # proxy for the ambient temperature
     polynome = get_poly_fit(np.arange(len(df)),df['Temperature'].values,config_dict['poly_fit_deg'])
     df['poly_fit'] = polynome(np.arange(len(df)))
@@ -217,8 +218,6 @@ def get_data(filename, config_dict):
 
     df_extrema = getting_extrema(df['Temp_smooth'], config_dict)
 
-    print('config_dict')
-    print(config_dict)
     df = pd.concat([df, df_extrema], axis=1)
 
     temperature_series = df['Temperature']
@@ -472,6 +471,32 @@ def import_xlsx_to_df(filename,
             col_name_dict.update({key: value})
 
     return df[col_name_dict.values()], col_name_dict
+
+def process(config_dict):
+
+    # file_dropdown =   'Bangladesh_2023-12-12.xlsx',
+    #                   'Consolidated UG Data Jan 2023 Batch01.xlsx',
+    #                   'Consolidated UG Data Jan 2023 Batch02.xlsx',
+    #                   'Consolidated UG Data Jan 2023 Batch03a.xlsx',
+    #                   'Consolidated UG Data Jan 2023 Batch03b.xlsx',
+    #                   'Consolidated UG Data Jan 2023 Batch04.xlsx',
+    #                   'Kaliro Use Data (Kakosi Budumba) Batch05.xlsx'
+
+
+
+    data_directory = config_dict['dir_to_process']
+    selected_file = config_dict['file_dropdown']
+
+    df = get_data(os.path.join(data_directory, selected_file), config_dict)
+
+    res_dict_extrema = get_prediction_result_extrema(df, config_dict)
+    gui_output_extrema = extract_gui_output(res_dict_extrema)
+
+    res_dict_seasonal = get_prediction_result_seasonal(df, config_dict)
+    gui_output_seasonal = extract_gui_output(res_dict_seasonal)
+
+
+    return df, res_dict_extrema, res_dict_seasonal
 
 def resample_df(df, resample='1T'):
     # Ensure the index is in DateTime format
