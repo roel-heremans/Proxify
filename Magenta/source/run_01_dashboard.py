@@ -9,10 +9,13 @@ from dash.dependencies import Input, Output
 import os
 
 from utils.dash_utils import get_alternating_values, getting_extrema, get_data, get_plotly_fig, get_start_stops, \
-    import_xlsx_to_df, resample_df, get_prediction_result_extrema, get_prediction_result_seasonal, extract_gui_output
+    import_xlsx_to_df, resample_df, get_prediction_result_extrema, get_prediction_result_seasonal, extract_gui_output, \
+    get_files_from_dir
 
-
-config_dict = {'file_dropdown': ' ',
+# Adjust the dir_to_process following your needs
+config_dict = {'dir_to_process': '/home/rheremans/Repos/Proxify/Magenta/data',
+               'file_extension': '.xlsx',
+               'file_dropdown': ' ',
                'smooth_factor': 5,
                'resample_string': '1T',
                'poly_fit_deg': 20,
@@ -28,12 +31,11 @@ config_dict = {'file_dropdown': ' ',
                'detect_start_time': '00:00:00',
                'detect_stop_time': '23:59:00'}
 
+# getting the files to be processed from the directory config_dict['dir_to_process']
+_, file_names = get_files_from_dir(config_dict['dir_to_process'], config_dict['file_extension'])
+print('List2: {}'.format(file_names))
 
 app = dash.Dash(__name__)
-
-data_directory = 'data'
-file_names = sorted(os.listdir(data_directory))
-print('List: {}'.format(file_names))
 
 # Define layout
 app.layout = html.Div([
@@ -143,7 +145,8 @@ def update_graph(selected_file, smooth_factor, resample_string, poly_fit_deg,
         config_dict['detect_stop_time'] = detect_stop_time
 
         # Read data from the selected file using your read_data function
-        df = get_data(os.path.join(data_directory, selected_file), config_dict)
+        print("Selected file: {}".format(selected_file))
+        df,_ = get_data( selected_file, config_dict)
 
         # generate graph
         fig = get_plotly_fig(df, config_dict)
@@ -170,32 +173,32 @@ def update_graph(selected_file, smooth_factor, resample_string, poly_fit_deg,
 def update_duration_output(selected_file, selected_data, smooth_factor, resample_string, poly_fit_deg, dist_for_maxima,
                            dist_for_minima, peak_prominence, ambient_h2o_dropdown, detect_start_time, detect_stop_time):
     if selected_file:
-        df = get_data(os.path.join(data_directory, selected_file), config_dict)
-        data_sampling = (df.index[1]-df.index[0]).total_seconds() // 60
+        df, orig_data_sampling = get_data(selected_file, config_dict)
+
         # gui_output_extrema_full, gui_output_seasonal_full (goef, gosf)
         goef, gosf= recalculate_on_state_duration(df,config_dict)
 
         duration_output = html.Div([
             html.Label('Original Data Sampling: ', style={'margin-right': '5px'}),
-            html.Label(f'{data_sampling} minutes', style={'margin-right': '20px'}),
+            html.Label(f'{orig_data_sampling} minutes', style={'margin-right': '20px'}),
             html.Br(),
             html.Label('Method Local Extrema: Total duration: ', style={'margin-right': '5px'}),
-            html.Label(f'{goef["Total duration"]} minutes', style={'margin-right': '20px'}),
+            html.Label(f'{goef.get("Total duration (min)", 0)} minutes', style={'margin-right': '20px'}),
             html.Label('count: ', style={'margin-right': '5px'}),
-            html.Label(f'{goef["Nr of pump usage"]} times', style={'margin-right': '20px'}),
+            html.Label(f'{goef.get("Nr of pump usage", 0)} times', style={'margin-right': '20px'}),
             html.Label('Shortest: ', style={'margin-right': '5px'}),
-            html.Label(f'{goef["Shortest (min)"]} minutes', style={'margin-right': '20px'}),
+            html.Label(f'{goef.get("Shortest (min)", 0)} minutes', style={'margin-right': '20px'}),
             html.Label('Longest: ', style={'margin-right': '5px'}),
-            html.Label(f'{goef["Longest (min)"]} minutes'),
+            html.Label(f'{goef.get("Longest (min)", 0)} minutes'),
             html.Br(),
             html.Label('Method Seasonal: Total duration: ', style={'margin-right': '5px'}),
-            html.Label(f'{gosf["Total duration"]} minutes', style={'margin-right': '20px'}),
+            html.Label(f'{gosf.get("Total duration (min)", 0)} minutes', style={'margin-right': '20px'}),
             html.Label('Count: ', style={'margin-right': '5px'}),
-            html.Label(f'{gosf["Nr of pump usage"]} times', style={'margin-right': '20px'}),
+            html.Label(f'{gosf.get("Nr of pump usage", 0)} times', style={'margin-right': '20px'}),
             html.Label('Shortest: ', style={'margin-right': '5px'}),
-            html.Label(f'{gosf["Shortest (min)"]} minutes', style={'margin-right': '20px'}),
+            html.Label(f'{gosf.get("Shortest (min)", 0)} minutes', style={'margin-right': '20px'}),
             html.Label('Longest: ', style={'margin-right': '5px'}),
-            html.Label(f'{gosf["Longest (min)"]} minutes'),
+            html.Label(f'{gosf.get("Longest (min)", 0)} minutes'),
             #html.Label('"ON" duration (Box Selected Range): '),
             #html.Label(f'{on_state_duration_range} minutes')
         ])
@@ -216,46 +219,46 @@ def update_duration_output(selected_file, selected_data, smooth_factor, resample
             # Modify duration_output if selected_data is present
             duration_output = html.Div([
                 html.Label('Original Data Sampling: ', style={'margin-right': '5px'}),
-                html.Label(f'{data_sampling} minutes', style={'margin-right': '20px'}),
+                html.Label(f'{orig_data_sampling} minutes', style={'margin-right': '20px'}),
                 html.Br(),
                 html.Label('Method: Local Extrema: Total duration', style={'margin-right': '5px'}),
-                html.Label(f'{goef["Total duration"]} minutes', style={'margin-right': '20px'}),
+                html.Label(f'{goef.get("Total duration (min)", 0)} minutes', style={'margin-right': '20px'}),
                 html.Label('Count: ', style={'margin-right': '5px'}),
-                html.Label(f'{goef["Nr of pump usage"]} times', style={'margin-right': '20px'}),
+                html.Label(f'{goef.get("Nr of pump usage", 0)} times', style={'margin-right': '20px'}),
                 html.Label('Shortest: ', style={'margin-right': '5px'}),
-                html.Label(f'{goef["Shortest (min)"]} minutes', style={'margin-right': '20px'}),
+                html.Label(f'{goef.get("Shortest (min)", 0)} minutes', style={'margin-right': '20px'}),
                 html.Label('Longest: ', style={'margin-right': '5px'}),
-                html.Label(f'{goef["Longest (min)"]} minutes'),
+                html.Label(f'{goef.get("Longest (min)", 0)} minutes'),
                 html.Br(),
                 html.Label('Method: Seasonal: Total duration', style={'margin-right': '5px'}),
-                html.Label(f'{gosf["Total duration"]} minutes', style={'margin-right': '20px'}),
+                html.Label(f'{gosf.get("Total duration (min)", 0)} minutes', style={'margin-right': '20px'}),
                 html.Label('Count: ', style={'margin-right': '5px'}),
-                html.Label(f'{gosf["Nr of pump usage"]} times', style={'margin-right': '20px'}),
+                html.Label(f'{gosf.get("Nr of pump usage", 0)} times', style={'margin-right': '20px'}),
                 html.Label('Shortest: ', style={'margin-right': '5px'}),
-                html.Label(f'{gosf["Shortest (min)"]} minutes', style={'margin-right': '20px'}),
+                html.Label(f'{gosf.get("Shortest (min)", 0)} minutes', style={'margin-right': '20px'}),
                 html.Label('Longest: ', style={'margin-right': '5px'}),
-                html.Label(f'{gosf["Longest (min)"]} minutes'),
+                html.Label(f'{gosf.get("Longest (min)", 0)} minutes'),
                 html.Br(),
                 html.Br(),
                 html.Label('Box Selected Range: {} - {}'.format(x_values_min, x_values_max)),
                 html.Br(),
                 html.Label('Method: Local Extrema: Total duration: ', style={'margin-right': '5px'}),
-                html.Label(f'{goer["Total duration"]} minutes', style={'margin-right': '20px'}),
+                html.Label(f'{goer.get("Total duration (min)", 0)} minutes', style={'margin-right': '20px'}),
                 html.Label('Count: ', style={'margin-right': '5px'}),
-                html.Label(f'{goer["Nr of pump usage"]} times', style={'margin-right': '20px'}),
+                html.Label(f'{goer.get("Nr of pump usage", 0)} times', style={'margin-right': '20px'}),
                 html.Label('Shortest: ', style={'margin-right': '5px'}),
-                html.Label(f'{goer["Shortest (min)"]} minutes', style={'margin-right': '20px'}),
+                html.Label(f'{goer.get("Shortest (min)", 0)} minutes', style={'margin-right': '20px'}),
                 html.Label('Longest: ', style={'margin-right': '5px'}),
-                html.Label(f'{goer["Longest (min)"]} minutes'),
+                html.Label(f'{goer.get("Longest (min)", 0)} minutes'),
                 html.Br(),
                 html.Label('Method: Seasonal: Total duration: ', style={'margin-right': '5px'}),
-                html.Label(f'{gosr["Total duration"]} minutes', style={'margin-right': '20px'}),
+                html.Label(f'{gosr.get("Total duration (min)", 0)} minutes', style={'margin-right': '20px'}),
                 html.Label('Count: ', style={'margin-right': '5px'}),
-                html.Label(f'{gosr["Nr of pump usage"]} times', style={'margin-right': '20px'}),
+                html.Label(f'{gosr.get("Nr of pump usage", 0)} times', style={'margin-right': '20px'}),
                 html.Label('Shortest: ', style={'margin-right': '5px'}),
-                html.Label(f'{gosr["Shortest (min)"]} minutes', style={'margin-right': '20px'}),
+                html.Label(f'{gosr.get("Shortest (min)", 0)} minutes', style={'margin-right': '20px'}),
                 html.Label('Longest: ', style={'margin-right': '5px'}),
-                html.Label(f'{gosr["Longest (min)"]} minutes'),
+                html.Label(f'{gosr.get("Longest (min)", 0)} minutes'),
             ])
 
         return duration_output

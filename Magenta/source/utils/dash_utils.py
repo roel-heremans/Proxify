@@ -1,11 +1,19 @@
 import os
+import glob
+import warnings
+
 import pandas as pd
 import numpy as np
-from itertools import groupby
-from scipy.signal import find_peaks
+import matplotlib.pyplot as plt
 import plotly.graph_objects as go
+
+from scipy.signal import find_peaks
 from statsmodels.tsa.seasonal import seasonal_decompose
 from datetime import timedelta
+from plotly.subplots import make_subplots
+
+# Suppress the RankWarning
+warnings.filterwarnings('ignore', category=np.RankWarning)
 
 def correct_pump_on_window(time_series, ambient_h2o_dropdown, window_size):
 
@@ -35,6 +43,13 @@ def correct_pump_on_window(time_series, ambient_h2o_dropdown, window_size):
         break_point_idx = 0
 
     return break_point_idx
+
+def create_necessary_paths():
+    to_create_paths = [ os.path.join('plotly','dashb'), os.path.join('plotly','season'), 'tables']
+    for my_path in to_create_paths:
+        if not os.path.exists(os.path.join(os.getcwd(), my_path)):
+            # Create the directory
+            os.makedirs(os.path.join(os.getcwd(), my_path))
 
 def extract_gui_output(res_dict):
 
@@ -189,6 +204,7 @@ def get_data(filename, config_dict):
                                           timestamp_col_name=config_dict['timestamp_col_name'],
                                           temp_col_name=config_dict['temp_col_name'],
                                           gt_col_name=config_dict['gt_col_name'])
+    original_data_sampling = (df.index[1]-df.index[0]).total_seconds() // 60
 
     # Rename columns
     col_mapping = {col_name_dict['temp_col_name']: 'Temperature'}
@@ -197,7 +213,7 @@ def get_data(filename, config_dict):
 
     df= df.rename(columns=col_mapping)
 
-    # Put sampling frequency of incoming data to the Value writting in the Resample String: "1T" means each minute,
+    # Put sampling frequency of incoming data to the Value written in the Resample String: "1T" means each minute,
     # '5T' each 5 minutes,...
     df = resample_df(df, resample=config_dict['resample_string'])
     df['Temperature'].fillna(method='bfill', inplace=True)
@@ -246,7 +262,10 @@ def get_data(filename, config_dict):
 
     df.set_index('Timestamp', inplace=True)
 
-    return df
+    return df, original_data_sampling
+
+def get_files_from_dir(data_dir, file_extension):
+    return file_extension, sorted(glob.glob(os.path.join(data_dir, '*' + file_extension)))
 
 def get_plotly_fig(df, config_dict):
 
@@ -340,7 +359,6 @@ def get_plotly_fig(df, config_dict):
         xaxis=dict(showgrid=True, gridwidth=1, gridcolor='LightGrey'),  # Customize x-axis grid
         yaxis=dict(showgrid=True, gridwidth=1, gridcolor='LightGrey'),  # Customize y-axis grid
     )
-
     return fig
 
 def get_poly_fit(x,y,degree):
@@ -472,6 +490,73 @@ def import_xlsx_to_df(filename,
 
     return df[col_name_dict.values()], col_name_dict
 
+def make_trend_plot(df):
+
+    # Create subplots with shared x-axis
+    fig, axs = plt.subplots(4, 1, figsize=(10, 6), sharex=True)
+
+    # Plot original series
+    axs[0].plot(df['Temperature'], label='Original')
+    axs[0].plot(df['poly_fit'], label='Poly Fit', linestyle='--', color='red')
+    axs[0].legend(loc='upper left')
+
+    # Plot trend component
+    if 'trend' in df.columns:                    # then also seasonal and residue can be plotted
+        axs[1].plot(df['trend'], label='Trend')
+        axs[1].legend(loc='upper left')
+
+        # Plot seasonal component
+        axs[2].plot(df['seasonal'], label='Seasonal')
+        axs[2].legend(loc='upper left')
+
+        # Plot residue component
+        axs[3].plot(df['resid'], label='Residue')
+        axs[3].legend(loc='upper left')
+
+    # Plot Ground Truth
+    if 'GroundTruth' in df:
+        axs[3].plot(df['GroundTruth'], label='GT')
+        axs[3].legend(loc='upper left')
+
+    if 'trend' in df.columns:
+        threshold = 0.5  # Replace this with your desired threshold value
+        # Creating the 'pred' column based on the condition
+        df['pred'] = np.where(df['resid'] > threshold, threshold, np.nan)
+        axs[3].plot(df['pred'], label='Pred')
+        axs[3].legend(loc='upper left')
+
+    plt.tight_layout()  # Adjusts spacing between subplots for better visualization
+
+    return plt
+
+def make_trend_plotly(df):
+    fig = make_subplots(rows=4, cols=1, shared_xaxes=True, vertical_spacing=0.05)
+
+    # Plot original series and poly fit
+    fig.add_trace(go.Scatter(x=df.index, y=df['Temperature'], mode='lines', name='Original'), row=1, col=1)
+    fig.add_trace(go.Scatter(x=df.index, y=df['poly_fit'], mode='lines', name='Poly Fit', line=dict(dash='dash', color='red')), row=1, col=1)
+
+    # Plot trend component
+    if 'trend' in df.columns:
+        fig.add_trace(go.Scatter(x=df.index, y=df['trend'], mode='lines', name='Trend'), row=2, col=1)
+
+        # Plot seasonal component
+        fig.add_trace(go.Scatter(x=df.index, y=df['seasonal'], mode='lines', name='Seasonal'), row=3, col=1)
+
+        # Plot residue component
+        fig.add_trace(go.Scatter(x=df.index, y=df['resid'], mode='lines', name='Residue'), row=4, col=1)
+
+    # Plot Ground Truth and Pred
+    if 'GroundTruth' in df and 'trend' in df.columns:
+        threshold = 0.5  # Replace this with your desired threshold value
+        df['pred'] = np.where(df['resid'] > threshold, threshold, np.nan)
+        fig.add_trace(go.Scatter(x=df.index, y=df['GroundTruth'], mode='lines', name='Ground Truth'), row=4, col=1)
+        fig.add_trace(go.Scatter(x=df.index, y=df['pred'], mode='lines', name='Pred'), row=4, col=1)
+
+    fig.update_layout(height=800, width=800, title_text="Trend Components")  # Set the overall layout
+
+    return fig
+
 def process(config_dict):
 
     # file_dropdown =   'Bangladesh_2023-12-12.xlsx',
@@ -487,7 +572,7 @@ def process(config_dict):
     data_directory = config_dict['dir_to_process']
     selected_file = config_dict['file_dropdown']
 
-    df = get_data(os.path.join(data_directory, selected_file), config_dict)
+    df, _ = get_data(os.path.join(data_directory, selected_file), config_dict)
 
     res_dict_extrema = get_prediction_result_extrema(df, config_dict)
     gui_output_extrema = extract_gui_output(res_dict_extrema)
