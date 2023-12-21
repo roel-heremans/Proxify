@@ -1,4 +1,5 @@
 import os
+import glob
 import warnings
 
 import pandas as pd
@@ -212,7 +213,7 @@ def get_data(filename, config_dict):
 
     df= df.rename(columns=col_mapping)
 
-    # Put sampling frequency of incoming data to the Value writting in the Resample String: "1T" means each minute,
+    # Put sampling frequency of incoming data to the Value written in the Resample String: "1T" means each minute,
     # '5T' each 5 minutes,...
     df = resample_df(df, resample=config_dict['resample_string'])
     df['Temperature'].fillna(method='bfill', inplace=True)
@@ -262,6 +263,9 @@ def get_data(filename, config_dict):
     df.set_index('Timestamp', inplace=True)
 
     return df, original_data_sampling
+
+def get_files_from_dir(data_dir, file_extension):
+    return file_extension, sorted(glob.glob(os.path.join(data_dir, '*' + file_extension)))
 
 def get_plotly_fig(df, config_dict):
 

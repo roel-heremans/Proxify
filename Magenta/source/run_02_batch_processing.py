@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 
 from utils.dash_utils import process, extract_gui_output, make_trend_plotly, get_plotly_fig, create_necessary_paths
+from utils.dash_utils import get_files_from_dir
 
 # Suppress the RankWarning
 warnings.filterwarnings('ignore', category=np.RankWarning)
@@ -38,10 +39,6 @@ def get_duration(start, end):
     if (start is not None) and (end is not None):
         duration = (end-start).total_seconds() // 60
     return duration
-
-
-def get_files_from_dir(data_dir, file_extension):
-    return file_extension, sorted(glob.glob(os.path.join(data_dir, '*' + file_extension)))
 
 def get_meta_info(config_dict, file_names):
     directory_name = config_dict['dir_to_process']

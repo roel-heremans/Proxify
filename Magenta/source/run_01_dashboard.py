@@ -9,10 +9,13 @@ from dash.dependencies import Input, Output
 import os
 
 from utils.dash_utils import get_alternating_values, getting_extrema, get_data, get_plotly_fig, get_start_stops, \
-    import_xlsx_to_df, resample_df, get_prediction_result_extrema, get_prediction_result_seasonal, extract_gui_output
+    import_xlsx_to_df, resample_df, get_prediction_result_extrema, get_prediction_result_seasonal, extract_gui_output, \
+    get_files_from_dir
 
-
-config_dict = {'file_dropdown': ' ',
+# Adjust the dir_to_process following your needs
+config_dict = {'dir_to_process': '/home/rheremans/Repos/Proxify/Magenta/data',
+               'file_extension': '.xlsx',
+               'file_dropdown': ' ',
                'smooth_factor': 5,
                'resample_string': '1T',
                'poly_fit_deg': 20,
@@ -28,12 +31,11 @@ config_dict = {'file_dropdown': ' ',
                'detect_start_time': '00:00:00',
                'detect_stop_time': '23:59:00'}
 
+# getting the files to be processed from the directory config_dict['dir_to_process']
+_, file_names = get_files_from_dir(config_dict['dir_to_process'], config_dict['file_extension'])
+print('List2: {}'.format(file_names))
 
 app = dash.Dash(__name__)
-
-data_directory = 'data'
-file_names = sorted(os.listdir(data_directory))
-print('List: {}'.format(file_names))
 
 # Define layout
 app.layout = html.Div([
@@ -143,7 +145,8 @@ def update_graph(selected_file, smooth_factor, resample_string, poly_fit_deg,
         config_dict['detect_stop_time'] = detect_stop_time
 
         # Read data from the selected file using your read_data function
-        df,_ = get_data(os.path.join(data_directory, selected_file), config_dict)
+        print("Selected file: {}".format(selected_file))
+        df,_ = get_data( selected_file, config_dict)
 
         # generate graph
         fig = get_plotly_fig(df, config_dict)
@@ -170,7 +173,7 @@ def update_graph(selected_file, smooth_factor, resample_string, poly_fit_deg,
 def update_duration_output(selected_file, selected_data, smooth_factor, resample_string, poly_fit_deg, dist_for_maxima,
                            dist_for_minima, peak_prominence, ambient_h2o_dropdown, detect_start_time, detect_stop_time):
     if selected_file:
-        df, orig_data_sampling = get_data(os.path.join(data_directory, selected_file), config_dict)
+        df, orig_data_sampling = get_data(selected_file, config_dict)
 
         # gui_output_extrema_full, gui_output_seasonal_full (goef, gosf)
         goef, gosf= recalculate_on_state_duration(df,config_dict)
