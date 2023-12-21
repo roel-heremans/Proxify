@@ -1,0 +1,101 @@
+The following code can be used to benchmark the different models for the service call predictions.
+The configuration file for running the scripts is as follows:
+Script path: ~/repo/dev_quality_service_call_forecasting/notebooks/02_modeling/01_modeling_using_sample_data
+Working directory:~/repo/dev_quality_service_call_forecasting/notebooks/02_modeling/01_modeling_using_sample_data
+
+
+05_benchmark_data.py
+++++++++++++++++++++
+You need the run first "benchmark_data.py" for which you need surpyval and other standard packages as mentioned in the
+requirements.txt file. I have found some small bugs in the surpyval package which I corrected locally.
+Running "benchmark_data.py" will generate different plots which are stored in the plots directory and it will also
+create one summary table for the MAPE and MdAPE results for the different methods for the different product hierarchy
+(Line, Group, SubGroup). In total 7 menthods are run and compared: 'weibull', 'gamma',
+'lfp' (Limited Failure Population), 'mm2w' (mixture model based on 2 weibull distributions), 'tb' (turnbull), and
+2 naive models 'naive' (1 month comparison) and 'avg' (12 month average comparison).
+Also in_out_df's are generated for each hierarchy which contain the service calls actual (for 12 months of a given sales
+batch) and forecasted (again for 12 months of a given sales batch), those dataframes will be used to calculate the SCR
+
+06_export_benchmark_tables_and_figures.py
++++++++++++++++++++++++++++++++++++++++++
+Running the "benchmark_data.py" also creates a pickle file (i.e. pickles/all_results.pkl) which is used by
+create summary figures. This script creates the summary of the different methods. It shows the mean and std on the
+MAPE and MdAPE for the different methods.
+It also uses the pickles/all_results.pkl to generate the different tables on MAPE and MdAPE, used to create the power point
+presentation.
+
+07_draw_ml_model.py
++++++++++++++++++++
+Is a stand alone script that is used to generate the diagrams/figures that explain how the train/test/prediction is done
+in terms of what data intervals are used to build the models.
+
+08_create_sales_forecast_figure
++++++++++++++++++++++++++++++++
+Is a standalone script that creates three figures: the first figure is based on sales forecast data added to the script.
+That figer was added to the sprint review: "sprint-review.20231027". The second and third figure are based on the
+added csv file (data/actual_vs_forecast_sales_volume_all_europe.csv), and were created for the sprintreview:
+"sprint-review.20231027" it shows the sales forecast versus actual for the whole Europe Market. The average Mape is 18%
+without scaling and
+
+09_SCR_analysis
++++++++++++++++
+First attempt to predict the SCR (metric used by the Quality team based on weighted averages on the service calls and sales batches), 
+based on an lstm forcaster. Input data is SCR and forcast is scr directly, not going over the number of service calls. Was a first shot 
+but is actually not further explored. Creates evaluation plots as well.
+
+10_regression_surpyval
+++++++++++++++++++++++
+First shot on the regression on the service call prediction. Only model generation is ready. Using the model to predict
+is not yet finished, neither the evaluation of the method. An other approach has been taken to perform the regression, which is based
+on Markov Chains (with the help of Oskar) see 10b_regression_MarkovChain
+
+10b_regression_MarkovChain
+++++++++++++++++++++++++++
+This is the python code that I (Roel) ran in pycharm, althouhg it got transformed into a notebook that is able to run in databricks (see 10b_run_script)
+
+10b-run_script
+++++++++++++++
+The code present in 10b_regression_MarkovChain has been copied into a notebook cell and the main into another cell. And everything can be runned 
+using the p_datascience_roels_cluster in databricks. Just run all and you should get the figures and the sunburst html files representing the 
+hierarchy segmentation based on the average mape. Which reflects on the quality of the prediction, low average mape indicates a prooduct hierarchy that
+has a good prediction, high average mape indicates a product hierarchy for which the prediction does not work so good. One can look into the amount of 
+sold quantities to see if this is the reason why the prediction didnt work well. But this needs to be worked out further.
+
+10c_regression_segmentation_sunburst
+++++++++++++++++++++++++++++++++++++
+This is a standalone (data is saved under the utils.util.py file for quicker usage) function that can be used to generate the sunburst plots.
+It was created in order to play with the visualization further. The aim was to receive a popup (when hovering over a particular segment of 
+the sunburst graph) which would visualizes (through html) the png of that particular segment (also know as product hierarchy). The part that 
+creates the html version of the png is commented out but can be activated. Check out the location where the following code appears:
+   # Create an HTML image tag to display the PNG in the hover
+   #   return f'<img src="data:image/png;base64,{encoded_image}" width="200" height="200">'  # Adjust width and height as needed
+copying the string in an html file and opening it in the browser will show you the same as the corresponding png file. So that part is working but the popup 
+does unfortunately not work. Gave it lower priority to make this feature available. 
+
+10d_regression_predict_future
++++++++++++++++++++++++++++++
+This is the python code that I (Roel) was running in pycharm, althouhg for usability it got transformed into a notebook that can be run in databricks.
+(see 10d_run_script)
+
+10d_run_script
+++++++++++++++
+
+10e_sample_size_segmentation
+++++++++++++++++++++++++++++
+This creates a plotly interactive graph (scatter plot) that shows the effect of the sample size (Qty_Sold) on the mape (of the SCR). Each product hierarchy 
+(line-group-subgroup) has a different color. Hovering over a datapoint shows you which product is presented. OIne can clearly see that the product lines
+have more volume (bigger sample size) and lower mape (better prediction performance). The graph is based on saved data, loaded "from utils.util import load_sunburst_data"
+When you want to update the analysis you need to rerun the script "10b_regression_MarkovChain.py" this function allows you to update the sunburst_data.
+
+
+
+11_scf_partial_actuals:
+++++++++++++++++++++++++
+Here an analysis is performed to forcast the service calls using as much as possible the actual service call information.
+Checking the accuracy and bias using different sales batches and using varying amounts of service call actuals to forecast
+the next month. For example using service calls from 11 prefious months and predicting the 12th month, or using the
+service calls of the 10 previous months and forecasting the 11th month, until using the service calls of the last 4
+months and predicting the 5th month. The prediction can be done based on either of the following models: weibull, gamma,
+lfp, naive and avg. It is not possible to do it based on the nonparametric Turnbull model, since this can not do
+predictions outside the training range. Figures are made and stored in the plots subdirectory and are called:
+"SCF_Accuracy_{model_name}.png" and "SCF_Accuracy_{model_name}_overall.png".
