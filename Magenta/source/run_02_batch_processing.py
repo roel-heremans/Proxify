@@ -1,12 +1,11 @@
 import os
-
 import glob
 import warnings
 
 import numpy as np
 import pandas as pd
 
-from utils.dash_utils import process, extract_gui_output
+from utils.dash_utils import process, extract_gui_output, make_trend_plotly, get_plotly_fig, create_necessary_paths
 
 # Suppress the RankWarning
 warnings.filterwarnings('ignore', category=np.RankWarning)
@@ -32,12 +31,7 @@ config_dict = \
         'detect_stop_time': '23:59:00'
     }
 
-def create_necessary_paths():
-    to_create_paths = ['plots', 'plotly', 'tables']
-    for my_path in to_create_paths:
-        if not os.path.exists(os.path.join(os.getcwd(), my_path)):
-            # Create the directory
-            os.makedirs(os.path.join(os.getcwd(), my_path))
+
 
 def get_duration(start, end):
     duration = None
@@ -175,9 +169,20 @@ if __name__ == '__main__':
 
         config_dict.update({'file_dropdown': naked_file_name})
         df, res_dict_extrema, res_dict_seasonal = process(config_dict)
-        df = transform_to_df(i, naked_file_name, res_dict_extrema, res_dict_seasonal)
-        tab_df_dict.update({'{:03d}'.format(i+1): df})
-        df.to_excel(writer, sheet_name='{:03d}'.format(i+1), index=True)
+        df_for_excel = transform_to_df(i, naked_file_name, res_dict_extrema, res_dict_seasonal)
+        tab_df_dict.update({'{:03d}'.format(i+1): df_for_excel})
+        df_for_excel.to_excel(writer, sheet_name='{:03d}'.format(i+1), index=True)
+
+
+        # Create the seasonality plot in the plots directory
+        file_name = naked_file_name.replace(config_dict['file_extension'],'.html')
+        fig = make_trend_plotly(df)
+        fig.write_html(os.path.join('plotly','season', f"{i+1:03d}_" + file_name))
+
+        # Create the plotly figure in the plotly directory
+        file_name = naked_file_name.replace(config_dict['file_extension'],'.html')
+        fig = get_plotly_fig(df, config_dict)
+        fig.write_html(os.path.join('plotly', 'dashb', f"{i+1:03d}_" +file_name))
 
     writer = adjust_column_widths_automatically(writer, tab_df_dict)
     writer.close()
