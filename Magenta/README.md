@@ -1,3 +1,5 @@
+
+
 Open in pycharm a terminal and go to the directory where
 you want to create the virtual environment ; for me it is
 ~Repos/Proxify/Magenta.

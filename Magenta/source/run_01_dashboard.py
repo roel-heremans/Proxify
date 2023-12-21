@@ -1,19 +1,15 @@
 import dash
 import pandas as pd
-import numpy as np
-from itertools import groupby
-from scipy.signal import find_peaks
 from dash import dcc, html
-import plotly.graph_objects as go
 from dash.dependencies import Input, Output
-import os
+
 
 from utils.dash_utils import get_alternating_values, getting_extrema, get_data, get_plotly_fig, get_start_stops, \
     import_xlsx_to_df, resample_df, get_prediction_result_extrema, get_prediction_result_seasonal, extract_gui_output, \
     get_files_from_dir
 
 # Adjust the dir_to_process following your needs
-config_dict = {'dir_to_process': '/home/rheremans/Repos/Proxify/Magenta/data',
+config_dict = {'dir_to_process': 'data',
                'file_extension': '.xlsx',
                'file_dropdown': ' ',
                'smooth_factor': 5,

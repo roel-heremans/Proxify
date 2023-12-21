@@ -1,5 +1,4 @@
 import os
-import glob
 import warnings
 
 import numpy as np
@@ -10,11 +9,12 @@ from utils.dash_utils import get_files_from_dir
 
 # Suppress the RankWarning
 warnings.filterwarnings('ignore', category=np.RankWarning)
+
+
 # Specify all the parameters here, as well as the director that needs to be processed
-# all the files
 config_dict = \
     {
-        'dir_to_process': '/home/rheremans/Repos/Proxify/Magenta/data/',
+        'dir_to_process': 'data/',
         'file_extension': '.xlsx',
         'smooth_factor': 5,
         'resample_string': '1T',
@@ -31,8 +31,6 @@ config_dict = \
         'detect_start_time': '00:00:00',
         'detect_stop_time': '23:59:00'
     }
-
-
 
 def get_duration(start, end):
     duration = None
