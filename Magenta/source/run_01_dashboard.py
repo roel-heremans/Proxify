@@ -23,7 +23,7 @@ config_dict = {'dir_to_process': 'data',
                'res_thres_minus': -0.5,
                'timestamp_col_name':'DateTime_EAT',
                'temp_col_name':'Celsius',
-               'gt_col_name':'Use_event',
+               'gt_col_name':'',
                'detect_start_time': '00:00:00',
                'detect_stop_time': '23:59:00'}
 

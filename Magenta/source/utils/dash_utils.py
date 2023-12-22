@@ -507,10 +507,11 @@ def make_trend_plotly(df):
         fig.add_trace(go.Scatter(x=df.index, y=df['resid'], mode='lines', name='Residue'), row=4, col=1)
 
     # Plot Ground Truth and Pred
-    if 'GroundTruth' in df and 'trend' in df.columns:
+    if 'GroundTruth' in df:
+        fig.add_trace(go.Scatter(x=df.index, y=df['GroundTruth'], mode='lines', name='Ground Truth'), row=4, col=1)
+    if 'trend' in df.columns:
         threshold = 0.5  # Replace this with your desired threshold value
         df['pred'] = np.where(df['resid'] > threshold, threshold, np.nan)
-        fig.add_trace(go.Scatter(x=df.index, y=df['GroundTruth'], mode='lines', name='Ground Truth'), row=4, col=1)
         fig.add_trace(go.Scatter(x=df.index, y=df['pred'], mode='lines', name='Pred'), row=4, col=1)
 
     fig.update_layout(height=800, width=800, title_text="Trend Components")  # Set the overall layout
